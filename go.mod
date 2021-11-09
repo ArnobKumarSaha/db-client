@@ -3,6 +3,7 @@ module github.com/Arnobkumarsaha/mongotry
 go 1.16
 
 require (
+	github.com/joho/godotenv v1.3.0
 	go.mongodb.org/mongo-driver v1.1.2
 	k8s.io/api v0.21.1
 	k8s.io/apimachinery v0.21.1

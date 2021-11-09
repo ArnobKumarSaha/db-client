@@ -69,7 +69,10 @@ func (o *KubeDBClientBuilder) WithCerts(certs *certholder.ResourceCerts) *KubeDB
 }
 
 /*
-
+GetMongoClient first sets the url
+call getMongoDBClientOpts
+get the mongo-client using mongo.Connect()
+client.Ping()
  */
 func (o *KubeDBClientBuilder) GetMongoClient() (*Client, error) {
 	db := o.db
@@ -78,7 +81,6 @@ func (o *KubeDBClientBuilder) GetMongoClient() (*Client, error) {
 		o.url = o.getURL()
 	}
 
-	fmt.Println("i am here")
 	if o.podName == "" && o.url == "" {
 		if db.Spec.ShardTopology != nil {
 			// Shard
@@ -86,6 +88,7 @@ func (o *KubeDBClientBuilder) GetMongoClient() (*Client, error) {
 		} else {
 			// Standalone or ReplicaSet
 			o.url = strings.Join(db.Hosts(), ",")
+			// url looks like, mgo-rs-1.mgo-rs-pods.demo.svc,...,...
 		}
 	}
 
@@ -119,6 +122,8 @@ func (o *KubeDBClientBuilder) getURL() string {
 	return fmt.Sprintf("%s.%s.%s.svc", o.podName, o.db.GoverningServiceName(nodeType), o.db.Namespace)
 }
 
+// If tls not specified, clientOpts looks like "mongodb://USER:PASS@o.URL/admin?repSetConfig"
+// it also calls SetDirect & SetConnectTimeout before returning the ClientOptions
 func (o *KubeDBClientBuilder) getMongoDBClientOpts() (*mgoptions.ClientOptions, error) {
 	db := o.db
 	repSetConfig := ""
