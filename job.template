@@ -1,0 +1,12 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${JOB_NAME}
+spec:
+  template:
+    spec:
+      containers:
+        - name: ${JOB_NAME}
+          image: ${REGISTRY}/${JOB_NAME}
+          imagePullPolicy: Always
+      restartPolicy: Never

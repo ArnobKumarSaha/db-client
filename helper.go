@@ -48,3 +48,17 @@ func createMongoDB() *api.MongoDB {
 		},
 	}
 }
+
+/*
+	// sample controller approach
+	factory := commonInformer.NewSharedInformerFactory(versionedClient, time.Second *3)
+	mongoInformer := factory.Kubedb().V1alpha2().MongoDBs()
+	mongoLister := mongoInformer.Lister()
+
+	item, errr := mongoLister.MongoDBs(mongoDBNamespace).Get(mongoDBName)
+	fmt.Println("item = ", item)
+	if errr != nil{
+		fmt.Println("Error in lister.Get()")
+	}else{
+		fmt.Println("Whooo Got the item", item)
+	}*/

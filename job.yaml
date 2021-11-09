@@ -1,0 +1,12 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kubernetes-go-test
+spec:
+  template:
+    spec:
+      containers:
+        - name: kubernetes-go-test
+          image: arnobkumarsaha/kubernetes-go-test
+          imagePullPolicy: Always
+      restartPolicy: Never
