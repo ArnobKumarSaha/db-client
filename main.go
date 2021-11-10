@@ -3,15 +3,15 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/Arnobkumarsaha/mongotry/dbclient"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 	"kubedb.dev/apimachinery/client/clientset/versioned"
+	dbclient "kubedb.dev/db-client-go/mongodb"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"time"
 )
 
@@ -36,7 +36,8 @@ func main()  {
 		klog.Fatalf("Error building kubeconfig: %s", err.Error())
 		return
 	}
-	kubeClient, err := kubernetes.NewForConfig(cfg)
+	//kubeClient, err := kubernetes.NewForConfig(cfg)
+	kubeClient , err := client.New(cfg, client.Options{})
 	if err != nil {
 		klog.Fatalf("Error building kubernetes clientset: %s", err.Error())
 		return
@@ -59,7 +60,7 @@ func main()  {
 	mongoCtx, cancel := context.WithTimeout(context.Background(), 15 * time.Second)
 	defer cancel()
 
-	mongoClient, err := dbclient.NewKubeDBClientBuilder( item, kubeClient).WithContext(mongoCtx).GetMongoClient()
+	mongoClient, err := dbclient.NewKubeDBClientBuilder(  kubeClient, item).WithContext(mongoCtx).GetMongoClient()
 	// WithPod("mgo-rs-0") deleted
 	// if we dont specify the pod our dbClient will automatically find the master, otherwise not.
 	if err != nil{

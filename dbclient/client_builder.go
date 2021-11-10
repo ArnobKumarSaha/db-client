@@ -16,10 +16,12 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 	"kmodules.xyz/client-go/tools/certholder"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type KubeDBClientBuilder struct {
 	kubeClient kubernetes.Interface
+	kc 		   client.Client
 	db         *api.MongoDB
 	url        string
 	podName    string
