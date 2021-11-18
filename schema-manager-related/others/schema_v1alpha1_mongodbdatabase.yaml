@@ -1,0 +1,7 @@
+apiVersion: schema.kubedb.com/v1alpha1
+kind: MongoDBDatabase
+metadata:
+  name: mongodbdatabase-sample
+spec:
+  database_name: "mydb"
+  collection_name: "mytable"
