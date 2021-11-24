@@ -36,14 +36,88 @@ spec:
           spec:
             description: MongoDBDatabaseSpec defines the desired state of MongoDBDatabase
             properties:
-              collection_name:
-                description: a collection with name "CollectionName" will also be
-                  created
+              database_ref:
+                description: The reference to the Database of kind apimachinery/apis/kubedb
+                properties:
+                  dbref_name:
+                    type: string
+                  dbref_namespace:
+                    type: string
+                required:
+                - dbref_name
+                - dbref_namespace
+                type: object
+              database_schema:
+                description: To assing an actual database instance to an user
+                properties:
+                  dbschema_name:
+                    type: string
+                required:
+                - dbschema_name
+                type: object
+              deletion_policy:
+                description: DeletionPolicy controls the delete operation for database
                 type: string
-              database_name:
-                description: A database with name "DataBaseName" will be created in
-                  the primary replica
-                type: string
+              init:
+                description: Init is used to initialize database
+                properties:
+                  initialized:
+                    description: Initialized indicates that this database has been
+                      initialized. This will be set by the operator when status.conditions["Provisioned"]
+                      is set to ensure that database is not mistakenly reset when
+                      recovered using disaster recovery tools.
+                    type: boolean
+                  script_path:
+                    type: string
+                  waitForInitialRestore:
+                    description: Wait for initial DataRestore condition
+                    type: boolean
+                type: object
+              subjects:
+                description: The list of ServiceAccounts those will have some certain
+                  roles
+                items:
+                  properties:
+                    subject_kind:
+                      description: TypeMeta describes an individual object in an API
+                        response or request with strings representing the type of
+                        the object and its API schema version. Structures that are
+                        versioned or persisted should inline TypeMeta.
+                      properties:
+                        apiVersion:
+                          description: 'APIVersion defines the versioned schema of
+                            this representation of an object. Servers should convert
+                            recognized schemas to the latest internal value, and may
+                            reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+                          type: string
+                        kind:
+                          description: 'Kind is a string value representing the REST
+                            resource this object represents. Servers may infer this
+                            from the endpoint the client submits requests to. Cannot
+                            be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+                          type: string
+                      type: object
+                    subject_name:
+                      type: string
+                    subject_namespace:
+                      type: string
+                  required:
+                  - subject_kind
+                  - subject_name
+                  - subject_namespace
+                  type: object
+                type: array
+              vault_ref:
+                description: Reference to the VaultServer
+                properties:
+                  vaultref_name:
+                    type: string
+                  vaultref_namespace:
+                    type: string
+                required:
+                - vaultref_name
+                - vaultref_namespace
+                type: object
             type: object
           status:
             description: MongoDBDatabaseStatus defines the observed state of MongoDBDatabase

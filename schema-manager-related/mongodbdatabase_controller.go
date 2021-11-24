@@ -18,22 +18,22 @@ package schema
 
 import (
 	"context"
+	b64 "encoding/base64"
 	"fmt"
 	"github.com/go-logr/logr"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	batchv1 "k8s.io/api/batch/v1"
+	v1 "k8s.io/api/core/v1"
+	rbac "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/klog/v2"
-	"time"
-
 	"k8s.io/apimachinery/pkg/runtime"
-	"kubedb.dev/apimachinery/apis/kubedb/v1alpha2"
-	"kubedb.dev/apimachinery/client/clientset/versioned"
-	dbclient "kubedb.dev/db-client-go/mongodb"
+	"k8s.io/apimachinery/pkg/types"
+	clientutil "kmodules.xyz/client-go/client"
+	core_util "kmodules.xyz/client-go/core/v1"
+	"kmodules.xyz/custom-resources/apis/appcatalog/v1alpha1"
+	kdm "kubedb.dev/apimachinery/apis/kubedb/v1alpha2"
 	schemav1alpha1 "kubedb.dev/schema-manager/apis/schema/v1alpha1"
+	kvm_engine "kubevault.dev/apimachinery/apis/engine/v1alpha1"
+	kvm_server "kubevault.dev/apimachinery/apis/kubevault/v1alpha1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -59,47 +59,278 @@ type MongoDBDatabaseReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.10.0/pkg/reconcile
 func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	//_ = log.FromContext(ctx)
-	log := r.Log.WithValues("mongodbdatabases", req.NamespacedName)
+	log := r.Log.WithValues("mongodbdatabase", req.NamespacedName)
 
 	// TODO(user): your logic here
-	fmt.Println("Yeeh")
-	kubeClient, versionedClient, err := GetTheClients()
-	if err != nil {
-		log.Error(err, "Unable to make the Clients")
-		return ctrl.Result{}, err
+	/*
+		reqName, reqNamespace := req.Name, req.Namespace
+		var obj schemav1alpha1.MongoDBDatabase
+		if err := r.Get(ctx, req.NamespacedName, &obj); err != nil {
+			log.Error(err, "unable to fetch mongodb Database")
+			// we'll ignore not-found errors, since they can't be fixed by an immediate
+			// requeue (we'll need to wait for a new notification), and we can get them
+			// on deleted requests.
+			return ctrl.Result{}, client.IgnoreNotFound(err)
+		}
+		fmt.Println("Got the object successfully !", reqName, reqNamespace)
+
+		kubeClient, versionedClient, vaultServerClient, err := GetTheClients()
+		if err != nil {
+			log.Error(err, "Unable to make the Clients")
+			return ctrl.Result{}, err
+		}
+		log.Info("Clinets created successfully.")
+		mongoItem, err := GetMongoObject(&obj, versionedClient)
+		if err != nil {
+			log.Error(err, "Unable to get the Mongo Object")
+			return ctrl.Result{}, err
+		}
+		vaultServerItem, err := GetVaultServerObject(&obj, vaultServerClient)
+		if err != nil {
+			log.Error(err, "Unable to get the Vault server Object")
+			return ctrl.Result{}, err
+		}
+		log.Info("Mongo Object and VaultServer object has been found.")
+
+
+			//Now Create the SecretEngine & MongoDBRole. And approve the request.
+
+		fetchedEngine, err := vaultServerClient.EngineV1alpha1().SecretEngines(obj.Namespace).Get(ctx, makeSecretEngineName(obj.Name), metav1.GetOptions{})
+		if err != nil {
+			fmt.Printf("secret Engine of name %s has not been found. Trying to create it", makeSecretEngineName(obj.Name))
+			fetchedEngine, err = vaultServerClient.EngineV1alpha1().SecretEngines(obj.Namespace).Create(ctx, secretEngineSpecification(&obj), metav1.CreateOptions{})
+			if err != nil {
+				fmt.Println("Cant create the secret engine for mongodb")
+				return ctrl.Result{}, err
+			}
+		}
+
+		fetchedRole, err := vaultServerClient.EngineV1alpha1().MongoDBRoles(obj.Namespace).Get(ctx, MongoReaderWriterRole, metav1.GetOptions{})
+		if err != nil {
+			fmt.Printf("MongoDbRole of name %s doesn't exist. trying to create one", MongoReaderWriterRole)
+			vaultServerClient.EngineV1alpha1().MongoDBRoles(obj.Namespace).Create(ctx, ReaderWriterRoleSpecification(&obj), metav1.CreateOptions{})
+			if err != nil {
+				fmt.Println("Cant create the MongoDBRole")
+				return ctrl.Result{}, err
+			}
+		}
+
+		// *******************************************************
+		fetchedRequest, err := vaultServerClient.EngineV1alpha1().SecretAccessRequests(obj.Namespace).Get(ctx, MongoDBReadWriteSecretAccessRequest, metav1.GetOptions{})
+		if err != nil{
+			fmt.Printf("SecretAccessRequest of name %s has not been found. Trying to create one.", MongoDBReadWriteSecretAccessRequest)
+			fetchedRequest,err = vaultServerClient.EngineV1alpha1().SecretAccessRequests(obj.Namespace).Create(ctx, readWriteAccessRequestSpecification(&obj), metav1.CreateOptions{})
+			if err != nil {
+				fmt.Println("Cant create the Secret access request")
+				return ctrl.Result{}, err
+			}
+		}
+		// Role , secretEngine checked,
+		// But accessRequest not checked.
+		fmt.Println("from print")
+		log.Info("from log.Info")
+
+		fmt.Println(mongoItem.Name, vaultServerItem.Name, kubeClient, fetchedEngine.Name, fetchedRole.Name, fetchedRequest.Name)
+	*/
+
+	// First Get the actual CRD object of type MongoDBDatabase
+	reqName, reqNamespace := req.Name, req.Namespace
+	var obj schemav1alpha1.MongoDBDatabase
+	if err := r.Client.Get(ctx, req.NamespacedName, &obj); err != nil {
+		log.Error(err, "unable to fetch mongodb Database")
+		// we'll ignore not-found errors, since they can't be fixed by an immediate
+		// requeue (we'll need to wait for a new notification), and we can get them
+		// on deleted requests.
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	log.Info("Clinets created successfully.")
-	item, err := GetMongoObject(versionedClient)
+	fmt.Println("Got the object successfully !", reqName, reqNamespace)
+
+	// Getting The Mongo Server object
+	var mongo kdm.MongoDB
+	err := r.Client.Get(ctx, types.NamespacedName{
+		Namespace: obj.Spec.DatabaseRef.Namespace,
+		Name:      obj.Spec.DatabaseRef.Name,
+	}, &mongo)
 	if err != nil {
 		log.Error(err, "Unable to get the Mongo Object")
 		return ctrl.Result{}, err
 	}
-	mongoCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	mongoClient, err := GetMongoClient(mongoCtx, kubeClient, item)
+
+	// Getting The Vault Server object
+	var vault kvm_server.VaultServer
+	err = r.Client.Get(ctx, types.NamespacedName{
+		Namespace: obj.Spec.VaultRef.Namespace,
+		Name:      obj.Spec.VaultRef.Name,
+	}, &vault)
 	if err != nil {
-		log.Error(err, "Cant create MongoClient")
+		log.Error(err, "Unable to get the Vault server Object")
 		return ctrl.Result{}, err
 	}
-	defer mongoClient.Close()
+	log.Info("Mongo Object and VaultServer object both have been found.")
 
-	var db schemav1alpha1.MongoDBDatabase
-	if err := r.Get(ctx, req.NamespacedName, &db); err != nil{
-		log.Error(err, "")
+	// Create or Patch the Secret Engine
+	fetchedSecretEngine, vt, err := clientutil.CreateOrPatch(r.Client, &kvm_engine.SecretEngine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      makeSecretEngineName(obj.Name),
+			Namespace: obj.Namespace,
+		},
+	}, func(object client.Object, createOp bool) client.Object {
+		se := object.(*kvm_engine.SecretEngine)
+
+		se.Spec.VaultRef.Name = obj.Spec.VaultRef.Name
+		se.Spec.VaultRef.Namespace = obj.Spec.VaultRef.Namespace
+
+		//se.Spec.SecretEngineConfiguration.MongoDB.DatabaseRef.Name = obj.Spec.DatabaseRef.Name
+		//se.Spec.SecretEngineConfiguration.MongoDB.DatabaseRef.Namespace = obj.Spec.DatabaseRef.Namespace
+
+		se.Spec.SecretEngineConfiguration.MongoDB = &kvm_engine.MongoDBConfiguration{
+			DatabaseRef: v1alpha1.AppReference{
+				Namespace: obj.Spec.DatabaseRef.Namespace,
+				Name:      obj.Spec.DatabaseRef.Name,
+			},
+		}
+		se.Spec.SecretEngineConfiguration.MongoDB.PluginName = MongoDBDatabasePlugin
+
+		if createOp {
+			core_util.EnsureOwnerReference(&se.ObjectMeta, metav1.NewControllerRef(&obj, kdm.SchemeGroupVersion.WithKind(ResourceKindMongoDBDatabase)))
+		}
+		return se
+	})
+	if err != nil {
+		log.Error(err, "Unable to createOrPatch the required Secret Engine")
 		return ctrl.Result{}, err
 	}
-	crudCtx := context.TODO()
-	exists := checkIfExists(crudCtx, mongoClient, db.Spec.DatabaseName, db.Spec.CollectionName)
 
-	if !exists {
-		InsertIntoDatabase(crudCtx, mongoClient)
+	// CreateOrPatch the MongoDBRole
+	fetchedMongoDbRole, vt, err := clientutil.CreateOrPatch(r.Client, &kvm_engine.MongoDBRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      MongoReaderWriterRole,
+			Namespace: UserNamespace,
+		},
+	}, func(object client.Object, createOp bool) client.Object {
+		mr := object.(*kvm_engine.MongoDBRole)
+		mr.Spec.SecretEngineRef.Name = makeSecretEngineName(obj.Name)
+		mr.Spec.CreationStatements = append(mr.Spec.CreationStatements, "{ \"db\": \"mydb\", \"roles\": [{ \"role\": \"readWrite\" }] }")
+
+		if createOp {
+			core_util.EnsureOwnerReference(&mr.ObjectMeta, metav1.NewControllerRef(&obj, kdm.SchemeGroupVersion.WithKind(ResourceKindMongoDBDatabase)))
+		}
+		return mr
+	})
+	if err != nil {
+		log.Error(err, "Unable to createOrPatch the MongoDbRole.")
+		return ctrl.Result{}, err
 	}
-	FindInDatabase(crudCtx, mongoClient)
-	FindSingleInstance(crudCtx, mongoClient)
 
+	// a service account
+	fetchedServiceAccount, vt, err := clientutil.CreateOrPatch(r.Client, &v1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      MongoDbReadWriteServiceAccount,
+			Namespace: UserNamespace,
+		},
+	}, func(object client.Object, createOp bool) client.Object {
+		sa := object.(*v1.ServiceAccount)
+		if createOp {
+			core_util.EnsureOwnerReference(&sa.ObjectMeta, metav1.NewControllerRef(&obj, kdm.SchemeGroupVersion.WithKind(ResourceKindMongoDBDatabase)))
+		}
+		return sa
+	})
+	if err != nil {
+		log.Error(err, "Unable to createOrPatch the Service Account.")
+		return ctrl.Result{}, err
+	}
+
+	// Now make secret Access Request
+	fetchedAccessRequest, vt, err := clientutil.CreateOrPatch(r.Client, &kvm_engine.SecretAccessRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      MongoDBReadWriteSecretAccessRequest,
+			Namespace: UserNamespace,
+		},
+	}, func(object client.Object, createOp bool) client.Object {
+		sar := object.(*kvm_engine.SecretAccessRequest)
+
+		sar.Spec.RoleRef.Kind = ResourceKindMongoDBRole
+		sar.Spec.RoleRef.Name = MongoReaderWriterRole
+
+		var accessRequestFound = false
+		for i := 0; i < len(sar.Spec.Subjects); i++ {
+			sub := sar.Spec.Subjects[i]
+			if sub.Name == MongoDbReadWriteServiceAccount {
+				accessRequestFound = true
+			}
+		}
+		if !accessRequestFound {
+			sar.Spec.Subjects = append(sar.Spec.Subjects, rbac.Subject{
+				Kind:      rbac.ServiceAccountKind,
+				Name:      MongoDbReadWriteServiceAccount,
+				Namespace: UserNamespace,
+			})
+		}
+		if createOp {
+			core_util.EnsureOwnerReference(&sar.ObjectMeta, metav1.NewControllerRef(&obj, kdm.SchemeGroupVersion.WithKind(ResourceKindMongoDBDatabase)))
+		}
+
+		return sar
+	})
+	if err != nil {
+		log.Error(err, "Unable to createOrPatch the Secret Access request.")
+		return ctrl.Result{}, err
+	}
+	// Here we need to automate the vault approve command
+	////
+
+	// Get the username-password secret
+	// To do this, Firstly I have listed the secrets from userNamespace, then if that is our required secret -> captured it & decoded it.
+	var credentials v1.SecretList
+	var singleCred v1.Secret
+	err = r.Client.List(ctx, &credentials, &client.ListOptions{Namespace: UserNamespace})
+	if err != nil {
+		log.Error(err, "Can't get the secret which has been created after vault approve command")
+		return ctrl.Result{}, err
+	}
+	for _, cr := range credentials.Items {
+		fmt.Println(cr.Name)
+		if !checkPrefixMatch(cr.Name, MongoDBReadWriteSecretAccessRequest) {
+			continue
+		}
+		err = r.Client.Get(ctx, types.NamespacedName{
+			Namespace: UserNamespace,
+			Name:      cr.Name,
+		}, &singleCred)
+		if err != nil {
+			log.Error(err, "Unable to Get the required secret")
+			return ctrl.Result{}, err
+		}
+		fmt.Println("Listing the data from secret")
+		for k, v := range singleCred.Data {
+			str := b64.StdEncoding.EncodeToString(v)
+			val, err2 := b64.StdEncoding.DecodeString(str)
+			if err2 != nil {
+				log.Error(err, "Error occured when base64 decoding")
+				return ctrl.Result{}, err
+			}
+			fmt.Println(k, string(val))
+		}
+	}
+
+
+	// Job related things
+	createdJob, vt, err := clientutil.CreateOrPatch(r.Client, &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{},
+	}, func(object client.Object, createOp bool) client.Object {
+		job := object.(*batchv1.Job)
+
+		//if len(job.Spec.Template.Spec.Containers) >
+		return job
+	})
+
+	fmt.Println(fetchedSecretEngine.GetName(), vt, fetchedMongoDbRole.GetName(), fetchedAccessRequest.GetName(), fetchedServiceAccount.GetName(), createdJob.GetName())
 	return ctrl.Result{}, nil
 }
+
+/*
+VaultServer -> MongoDBServer -> SecretEngine -> MongoDBRole -> SecretAccessRequest ->
+*/
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MongoDBDatabaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -109,120 +340,149 @@ func (r *MongoDBDatabaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 const (
-	masterURL  string = ""
-	kubeconfig string = "" //"/home/arnob/.kube/config"
-)
-const (
-	mongoDBName      string = "mgo-rs"
-	mongoDBNamespace string = "demo"
-	mongoDBVersion   string = "4.2.3"
-)
-var (
-	DatabaseName   string //= "testing"
-	CollectionName string //= "numbers"
+	MongoDBDatabasePlugin       string = "mongodb-database-plugin"
+	ResourceKindMongoDBDatabase string = "MongoDBDatabase"
+	ResourceKindMongoDBRole     string = "MongoDBRole"
+	UserNamespace               string = "dev"
 )
 
-func checkIfExists(ctx context.Context, mongoClient *dbclient.Client, dbName, collName string ) bool {
-	DatabaseName = dbName
-	CollectionName = collName
-	lst ,err:= ListDatabases(ctx, mongoClient)
-	if err != nil{
-		fmt.Println(err)
+func checkPrefixMatch(secretName, accessRequestName string) bool {
+	if len(accessRequestName) > len(secretName) {
 		return false
 	}
-	for i:= 0; i < len(lst); i+=1 {
-		if lst[i] == dbName{
-			collections, err := mongoClient.Database(dbName).ListCollectionNames(ctx, bson.D{})
-			if err != nil{
-				fmt.Println(err)
-				return false
-			}
-			for j:=0; j<len(collections); j+=1{
-				if collections[j] == CollectionName{
-					return true
-				}
-			}
+	for i := 0; i < len(accessRequestName); i++ {
+		if accessRequestName[i] != secretName[i] {
 			return false
 		}
 	}
-	return false
+	return true
 }
 
-func FindSingleInstance(ctx context.Context, mongoClient *dbclient.Client) {
-	collection := mongoClient.Database(DatabaseName).Collection(CollectionName)
-	var result struct {
-		Value float64
-	}
-	filter := bson.D{primitive.E{Key: "name", Value: "pi"}}
-	err := collection.FindOne(ctx, filter).Decode(&result)
-	if err == mongo.ErrNoDocuments {
-		// Do something when no record was found
-		fmt.Println("record does not exist")
-	} else if err != nil {
-		klog.Fatalf("Error when decoding %s", err.Error())
-	} else {
-		fmt.Println("Single instance retrieved from collection -> ", result)
+func makeSecretEngineName(name string) string {
+	return name + "-secret-engine"
+}
+
+const (
+	// Roles
+	MongoReaderWriterRole string = "mongodb-reader-writer-role"
+	MongoReaderRole       string = "mongodb-reader-role"
+	MongoDBAdminRole      string = "mongodb-db-admin"
+
+	// Secret Access requests
+	MongoDBReadWriteSecretAccessRequest string = "mongodb-read-write-access-req"
+
+	// Service Accounts
+	MongoDbReadWriteServiceAccount string = "mongodb-read-write-sa"
+)
+
+/*
+func (r *MongoDBDatabaseReconciler) GetMongoDBObject(obj *schemav1alpha1.MongoDBDatabase)  {
+	//r.Client.Get(c)
+}
+
+// This block is for MongoDB Role , SecretAccessRequest & ServiceAccounts
+
+const (
+	// Roles
+	MongoReaderWriterRole string = "mongodb-reader-writer-role"
+	MongoReaderRole       string = "mongodb-reader-role"
+	MongoDBAdminRole      string = "mongodb-db-admin"
+
+	// Secret Access requests
+	MongoDBReadWriteSecretAccessRequest string = "mongodb-read-write-access-req"
+
+	// Service Accounts
+	MongoDbReadWriteServiceAccount string = "mongodb-read-write-sa"
+)
+
+// This block is for some kind and Plugin related constants
+
+const (
+	MongoDBDatabasePlugin string = "mongodb-database-plugin"
+
+	KindMongoDBRole string = "MongoDBRole"
+	KindServiceAccount string = "ServiceAccount"
+)
+func readWriteAccessRequestSpecification(obj *schemav1alpha1.MongoDBDatabase) *engineV1alpha1.SecretAccessRequest {
+	return &engineV1alpha1.SecretAccessRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: MongoDBReadWriteSecretAccessRequest,
+			Namespace: obj.Namespace,
+		},
+		Spec:       engineV1alpha1.SecretAccessRequestSpec{
+			RoleRef:                          corev1.TypedLocalObjectReference{
+				Kind:     KindMongoDBRole,
+				Name:     MongoReaderWriterRole,
+			},
+			Subjects:  []rbacv1.Subject{
+				{
+					Kind:      KindServiceAccount,
+					Name:      MongoDbReadWriteServiceAccount,
+					Namespace: obj.Namespace,
+				},
+			},
+		},
+		Status:     engineV1alpha1.SecretAccessRequestStatus{},
 	}
 }
 
-func FindInDatabase(ctx context.Context, mongoClient *dbclient.Client) {
-	collection := mongoClient.Database(DatabaseName).Collection(CollectionName)
-	cur, err := collection.Find(ctx, bson.D{})
+func ReaderWriterRoleSpecification(obj *schemav1alpha1.MongoDBDatabase) *engineV1alpha1.MongoDBRole {
+	return &engineV1alpha1.MongoDBRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      MongoReaderWriterRole,
+			Namespace: obj.Namespace,
+		},
+		Spec: engineV1alpha1.MongoDBRoleSpec{
+			SecretEngineRef: corev1.LocalObjectReference{
+				Name: makeSecretEngineName(obj.Name),
+			},
+			CreationStatements: []string{
+				"{ \"db\": \"mydb\", \"roles\": [{ \"role\": \"readWrite\" }] }",
+			},
+		},
+	}
+}
+
+func makeSecretEngineName(name string) string {
+	return name + "-secret-engine"
+}
+
+func secretEngineSpecification(obj *schemav1alpha1.MongoDBDatabase) *engineV1alpha1.SecretEngine {
+	return &engineV1alpha1.SecretEngine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      makeSecretEngineName(obj.Name),
+			Namespace: obj.Namespace,
+		},
+		Spec: engineV1alpha1.SecretEngineSpec{
+			VaultRef: kmapi.ObjectReference{
+				Name:      obj.Spec.VaultRef.Name,
+				Namespace: obj.Spec.VaultRef.Namespace,
+			},
+			SecretEngineConfiguration: engineV1alpha1.SecretEngineConfiguration{
+				MongoDB: &engineV1alpha1.MongoDBConfiguration{
+					DatabaseRef: v1alpha1.AppReference{
+						Name:      obj.Spec.DatabaseRef.Name,
+						Namespace: obj.Spec.DatabaseRef.Namespace,
+					},
+					PluginName: MongoDBDatabasePlugin,
+				},
+			},
+		},
+	}
+}
+
+func GetVaultServerObject(obj *schemav1alpha1.MongoDBDatabase, vaultVersionedClient *vaultversioned.Clientset) (*vaultV1alpha1.VaultServer, error) {
+	item, err := vaultVersionedClient.KubevaultV1alpha1().VaultServers(obj.Spec.VaultRef.Namespace).Get(context.Background(), obj.Spec.VaultRef.Name, metav1.GetOptions{})
 	if err != nil {
-		klog.Fatalf("Error occurred when finding in the collection %s,  %s", CollectionName, err.Error())
-		return
-	}
-	defer cur.Close(ctx)
-	// Looping through the cursor
-	for cur.Next(ctx) {
-		var result bson.D
-		err := cur.Decode(&result)
-		if err != nil {
-			klog.Fatalf("Can't decode the object. %s", err.Error())
-			return
-		}
-		fmt.Println(result)
-	}
-	if err := cur.Err(); err != nil {
-		klog.Fatalf("Error on the cursor %s", err.Error())
-		return
-	}
-}
-
-func InsertIntoDatabase(ctx context.Context, mongoClient *dbclient.Client) {
-	collection := mongoClient.Database(DatabaseName).Collection(CollectionName)
-	res, err := collection.InsertOne(ctx, bson.D{primitive.E{Key: "name", Value: "pi"}, primitive.E{Key: "value", Value: 3.14159}})
-	if err != nil {
-		klog.Fatalf("Can't insert data to the collection %s, %s", CollectionName, err.Error())
-		return
-	}
-	id := res.InsertedID
-	fmt.Println("inserted id = ", id)
-}
-
-func ListDatabases(ctx context.Context, mongoClient *dbclient.Client) ([]string, error){
-	dbList, err := mongoClient.ListDatabaseNames(ctx, &options.ListDatabasesOptions{})
-	if err != nil {
-		klog.Fatalf("Can't list the Databases. %s", err.Error())
+		klog.Fatalf("Error when getting the vault server object. %s", err.Error())
 		return nil, err
 	}
-	fmt.Println("Listed databases are :", dbList)
-	return dbList, nil
+	fmt.Println("Vault server object found")
+	return item, nil
 }
 
-func GetMongoClient(mongoCtx context.Context, kubeClient client.Client, item *v1alpha2.MongoDB) (*dbclient.Client, error) {
-
-	mongoClient, err := dbclient.NewKubeDBClientBuilder(kubeClient, item).WithContext(mongoCtx).GetMongoClient()
-	if err != nil {
-		klog.Fatalf("Running MongoDBClient failed. %s", err.Error())
-		return nil, err
-	}
-	fmt.Println("GetMongoClient ran successfully")
-	return mongoClient, nil
-}
-
-func GetMongoObject(versionedClient *versioned.Clientset) (*v1alpha2.MongoDB, error) {
-	item, err := versionedClient.KubedbV1alpha2().MongoDBs(mongoDBNamespace).Get(context.Background(), mongoDBName, metav1.GetOptions{})
+func GetMongoObject(obj *schemav1alpha1.MongoDBDatabase, versionedClient *versioned.Clientset) (*v1alpha2.MongoDB, error) {
+	item, err := versionedClient.KubedbV1alpha2().MongoDBs(obj.Spec.DatabaseRef.Namespace).Get(context.Background(), obj.Spec.DatabaseRef.Name, metav1.GetOptions{})
 	if err != nil {
 		klog.Fatalf("Error when getting the mongoDB object. %s", err.Error())
 		return nil, err
@@ -231,23 +491,37 @@ func GetMongoObject(versionedClient *versioned.Clientset) (*v1alpha2.MongoDB, er
 	return item, nil
 }
 
-func GetTheClients() (client.Client, *versioned.Clientset, error) {
+const (
+	masterURL  string = ""
+	kubeconfig string = "/home/arnob/.kube/config"
+)
+
+
+//GetTheClients gets the KubernetesClient, kubeDBClient & kubeVaultClient respectively
+
+func GetTheClients() (client.Client, *versioned.Clientset, *vaultversioned.Clientset, error) {
 	cfg, err := clientcmd.BuildConfigFromFlags(masterURL, kubeconfig)
 	if err != nil {
 		klog.Fatalf("Error building kubeconfig: %s", err.Error())
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	//kubeClient, err := kubernetes.NewForConfig(cfg)
 	kubeClient, err := client.New(cfg, client.Options{})
 	if err != nil {
 		klog.Fatalf("Error building kubernetes clientset: %s", err.Error())
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	versionedClient, err := versioned.NewForConfig(cfg)
 	if err != nil {
 		klog.Fatalf("Error building versioned clientset: %s", err.Error())
-		return nil, nil, err
+		return nil, nil, nil, err
+	}
+	vaultServerClient, err := vaultversioned.NewForConfig(cfg)
+	if err != nil {
+		klog.Fatalf("Error building versioned vault server clientset: %s", err.Error())
+		return nil, nil, nil, err
 	}
 	fmt.Println("All clients has been caught successfully.")
-	return kubeClient, versionedClient, nil
+	return kubeClient, versionedClient, vaultServerClient, nil
 }
+*/

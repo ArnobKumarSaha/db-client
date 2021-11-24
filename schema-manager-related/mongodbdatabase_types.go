@@ -28,12 +28,64 @@ type MongoDBDatabaseSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// A database with name "DataBaseName" will be created in the primary replica
-	DatabaseName string `json:"database_name,omitempty"`
+	// The reference to the Database of kind apimachinery/apis/kubedb
+	DatabaseRef `json:"database_ref,omitempty"`
 
-	// a collection with name "CollectionName" will also be created
-	CollectionName string `json:"collection_name,omitempty"`
+	// Reference to the VaultServer
+	VaultRef `json:"vault_ref,omitempty"`
+
+	// To assing an actual database instance to an user
+	DatabaseSchema `json:"database_schema,omitempty"`
+
+	// The list of ServiceAccounts those will have some certain roles
+	Subjects []Subject `json:"subjects,omitempty"`
+
+	// Init is used to initialize database
+	// +optional
+	Init *InitSpec `json:"init,omitempty"`
+
+	// DeletionPolicy controls the delete operation for database
+	// +optional
+	DeletionPolicy DeletionPolicy `json:"deletion_policy,omitempty"`
 }
+
+type DatabaseRef struct {
+	Name      string `json:"dbref_name"`
+	Namespace string `json:"dbref_namespace"`
+}
+
+type VaultRef struct {
+	Name      string `json:"vaultref_name"`
+	Namespace string `json:"vaultref_namespace"`
+}
+
+type DatabaseSchema struct {
+	Name string `json:"dbschema_name"`
+}
+
+type Subject struct {
+	SubjectKind metav1.TypeMeta `json:"subject_kind"`
+	Name        string          `json:"subject_name"`
+	Namespace   string          `json:"subject_namespace"`
+}
+
+type InitSpec struct {
+	// Initialized indicates that this database has been initialized.
+	// This will be set by the operator when status.conditions["Provisioned"] is set to ensure
+	// that database is not mistakenly reset when recovered using disaster recovery tools.
+	Initialized bool `json:"initialized,omitempty" protobuf:"varint,1,opt,name=initialized"`
+	// Wait for initial DataRestore condition
+	WaitForInitialRestore bool   `json:"waitForInitialRestore,omitempty" protobuf:"varint,2,opt,name=waitForInitialRestore"`
+	ScriptPath            string `json:"script_path,omitempty" protobuf:"bytes,1,opt,name=scriptPath"`
+}
+type DeletionPolicy string
+
+const (
+	// DeletionPolicyDelete Deletes database pods, service, pvcs and stash backup data.
+	DeletionPolicyDelete DeletionPolicy = "Delete"
+	// DeletionPolicyDoNotTerminate Rejects attempt to delete database using ValidationWebhook.
+	DeletionPolicyDoNotTerminate DeletionPolicy = "DoNotDelete"
+)
 
 // MongoDBDatabaseStatus defines the observed state of MongoDBDatabase
 type MongoDBDatabaseStatus struct {

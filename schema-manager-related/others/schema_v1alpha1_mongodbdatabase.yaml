@@ -2,6 +2,24 @@ apiVersion: schema.kubedb.com/v1alpha1
 kind: MongoDBDatabase
 metadata:
   name: mongodbdatabase-sample
+  namespace: dev
 spec:
-  database_name: "mydb"
-  collection_name: "mytable"
+  database_ref:
+    dbref_name: "mongodb"
+    dbref_namespace: "db"
+  vault_ref:
+    vaultref_name: "vault"
+    vaultref_namespace: "demo"
+  database_schema:
+    dbschema_name: "mydb"
+  subjects:
+    - subject_name: "sa_name"
+      subject_kind:
+        apiVersion: "v1"
+        kind: "ServiceAccount"
+      subject_namespace: "dev"
+  init:
+    initialized: false
+    waitForInitialRestore: true
+    script_path: "/home/arnob/Desktop/something.bash"
+  deletion_policy: "Delete"
