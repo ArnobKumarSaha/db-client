@@ -140,7 +140,8 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}, func(object client.Object, createOp bool) client.Object {
 		mr := object.(*kvm_engine.MongoDBRole)
 		mr.Spec.SecretEngineRef.Name = makeSecretEngineName(obj.Name)
-		mr.Spec.CreationStatements = append(mr.Spec.CreationStatements, "{ \"db\": \"mydb\", \"roles\": [{ \"role\": \"readWrite\" }] }")
+		generatedString := fmt.Sprintf("{ \"db\": \"%s\", \"roles\": [{ \"role\": \"readWrite\" }] }", obj.Spec.DatabaseSchema.Name)
+		mr.Spec.CreationStatements = append(mr.Spec.CreationStatements, generatedString)
 
 		if createOp {
 			core_util.EnsureOwnerReference(&mr.ObjectMeta, metav1.NewControllerRef(&obj, kdm.SchemeGroupVersion.WithKind(ResourceKindMongoDBDatabase)))
@@ -252,6 +253,25 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}, func(object client.Object, createOp bool) client.Object {
 		job := object.(*batchv1.Job)
 
+		if len(job.Spec.Template.Spec.Volumes) == 0 {
+			job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, v1.Volume{
+				Name: VolumeNameForPod,
+				VolumeSource: v1.VolumeSource{
+					ConfigMap: &v1.ConfigMapVolumeSource{
+						LocalObjectReference: v1.LocalObjectReference{
+							Name: obj.Spec.Init.Script.ConfigMap.Name,
+						},
+						Items: []v1.KeyToPath{
+							{
+								Key:  KeyNameForVolume,
+								Path: KeyPathForVolume,
+							},
+						},
+					},
+				},
+			})
+		}
+
 		if len(job.Spec.Template.Spec.Containers) == 0 {
 			job.Spec.Template.Spec.Containers = append(job.Spec.Template.Spec.Containers, v1.Container{
 				Name:  MongoImage,
@@ -281,14 +301,37 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 					},
 					{
 						Name:  "MONGODB_DATABASE_NAME",
-						Value: MongoDBDatabaseSchemaName,
+						Value: obj.Spec.DatabaseSchema.Name,
+					},
+					{ // Checking spec.init.script.configMap
+						Name: "HELLO",
+						ValueFrom: &v1.EnvVarSource{
+							ConfigMapKeyRef: &v1.ConfigMapKeySelector{
+								LocalObjectReference: v1.LocalObjectReference{
+									Name: obj.Spec.Init.Script.ConfigMap.Name,
+								},
+								Key: "hello",
+							},
+						},
+					},
+					{ // checking spec.init.pod_template.spec.env
+						Name:  obj.Spec.Init.PodTemplate.Spec.Env[0].Name,
+						Value: obj.Spec.Init.PodTemplate.Spec.Env[0].Value,
 					},
 				},
-				Command:         []string{"/bin/sh"},
-				Args:            []string{"-c", "mongo --host mongodb.db.svc.cluster.local --authenticationDatabase $MONGODB_DATABASE_NAME -u $MONGODB_USERNAME -p $MONGODB_PASSWORD"},
+				Command: []string{"/bin/sh"},
+				Args:    []string{"-c", "sleep 900"},
+				//Args:            []string{"-c", "mongo --host mongodb.db.svc.cluster.local --authenticationDatabase $MONGODB_DATABASE_NAME -u $MONGODB_USERNAME -p $MONGODB_PASSWORD"},
 				ImagePullPolicy: v1.PullAlways,
+				VolumeMounts: []v1.VolumeMount{
+					{
+						Name:      VolumeNameForPod,
+						MountPath: VolumeMountPath,
+					},
+				},
 			})
 		}
+
 		job.Spec.Template.Spec.RestartPolicy = v1.RestartPolicyOnFailure
 		job.Spec.BackoffLimit = func(i int32) *int32 { return &i }(5)
 

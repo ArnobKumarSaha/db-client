@@ -21,5 +21,13 @@ spec:
   init:
     initialized: false
     waitForInitialRestore: true
-    script_path: "/home/arnob/Desktop/something.bash"
+    script:
+      script_path: "/home/arnob"
+      configMap:
+        name: "test-cm"
+    pod_template:
+      spec:
+        env:
+          - name: "have-a-try"
+            value: "whoo! It works"
   deletion_policy: "Delete"

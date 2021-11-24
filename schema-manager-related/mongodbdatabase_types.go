@@ -17,7 +17,9 @@ limitations under the License.
 package v1alpha1
 
 import (
+	core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "kmodules.xyz/offshoot-api/api/v1"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -29,13 +31,13 @@ type MongoDBDatabaseSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// The reference to the Database of kind apimachinery/apis/kubedb
-	DatabaseRef `json:"database_ref,omitempty"`
+	DatabaseRef DatabaseRef `json:"database_ref,omitempty"`
 
 	// Reference to the VaultServer
-	VaultRef `json:"vault_ref,omitempty"`
+	VaultRef VaultRef `json:"vault_ref,omitempty"`
 
 	// To assing an actual database instance to an user
-	DatabaseSchema `json:"database_schema,omitempty"`
+	DatabaseSchema DatabaseSchema `json:"database_schema,omitempty"`
 
 	// The list of ServiceAccounts those will have some certain roles
 	Subjects []Subject `json:"subjects,omitempty"`
@@ -75,9 +77,18 @@ type InitSpec struct {
 	// that database is not mistakenly reset when recovered using disaster recovery tools.
 	Initialized bool `json:"initialized,omitempty" protobuf:"varint,1,opt,name=initialized"`
 	// Wait for initial DataRestore condition
-	WaitForInitialRestore bool   `json:"waitForInitialRestore,omitempty" protobuf:"varint,2,opt,name=waitForInitialRestore"`
-	ScriptPath            string `json:"script_path,omitempty" protobuf:"bytes,1,opt,name=scriptPath"`
+	WaitForInitialRestore bool              `json:"waitForInitialRestore,omitempty" protobuf:"varint,2,opt,name=waitForInitialRestore"`
+	Script                *ScriptSourceSpec `json:"script,omitempty" protobuf:"bytes,1,opt,name=scriptPath"`
+
+	// This will take some database related config from the user
+	PodTemplate v1.PodTemplateSpec `json:"pod_template,omitempty"`
 }
+
+type ScriptSourceSpec struct {
+	ScriptPath        string `json:"script_path,omitempty" protobuf:"bytes,1,opt,name=scriptPath"`
+	core.VolumeSource `json:",inline,omitempty" protobuf:"bytes,2,opt,name=volumeSource"`
+}
+
 type DeletionPolicy string
 
 const (

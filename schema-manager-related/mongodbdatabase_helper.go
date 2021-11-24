@@ -10,6 +10,15 @@ const (
 	MongoDBDatabaseSchemaName   string = "mydb"
 )
 
+// Extra stuffs
+
+const (
+	VolumeNameForPod string = "random-volume-1"
+	VolumeMountPath  string = "/etc/config"
+	KeyNameForVolume string = "examplefile"
+	KeyPathForVolume string = "mypath"
+)
+
 func checkPrefixMatch(secretName, accessRequestName string) bool {
 	if len(accessRequestName) > len(secretName) {
 		return false
