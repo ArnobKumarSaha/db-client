@@ -119,7 +119,7 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 				Name:      obj.Spec.DatabaseRef.Name,
 			},
 		}
-		se.Spec.SecretEngineConfiguration.MongoDB.PluginName = MongoDBDatabasePlugin
+		se.Spec.SecretEngineConfiguration.MongoDB.PluginName = kvm_engine.DefaultMongoDBDatabasePlugin
 
 		if createOp {
 			core_util.EnsureOwnerReference(&se.ObjectMeta, metav1.NewControllerRef(&obj, kdm.SchemeGroupVersion.WithKind(ResourceKindMongoDBDatabase)))
@@ -135,7 +135,7 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	fetchedMongoDbRole, vt, err := clientutil.CreateOrPatch(r.Client, &kvm_engine.MongoDBRole{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      MongoReaderWriterRole,
-			Namespace: UserNamespace,
+			Namespace: obj.Namespace,
 		},
 	}, func(object client.Object, createOp bool) client.Object {
 		mr := object.(*kvm_engine.MongoDBRole)
@@ -157,7 +157,7 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	fetchedServiceAccount, vt, err := clientutil.CreateOrPatch(r.Client, &v1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      MongoDbReadWriteServiceAccount,
-			Namespace: UserNamespace,
+			Namespace: obj.Namespace,
 		},
 	}, func(object client.Object, createOp bool) client.Object {
 		sa := object.(*v1.ServiceAccount)
@@ -175,12 +175,12 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	fetchedAccessRequest, vt, err := clientutil.CreateOrPatch(r.Client, &kvm_engine.SecretAccessRequest{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      MongoDBReadWriteSecretAccessRequest,
-			Namespace: UserNamespace,
+			Namespace: obj.Namespace,
 		},
 	}, func(object client.Object, createOp bool) client.Object {
 		sar := object.(*kvm_engine.SecretAccessRequest)
 
-		sar.Spec.RoleRef.Kind = ResourceKindMongoDBRole
+		sar.Spec.RoleRef.Kind = kvm_engine.ResourceKindMongoDBRole
 		sar.Spec.RoleRef.Name = MongoReaderWriterRole
 
 		var accessRequestFound = false
@@ -194,7 +194,7 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			sar.Spec.Subjects = append(sar.Spec.Subjects, rbac.Subject{
 				Kind:      rbac.ServiceAccountKind,
 				Name:      MongoDbReadWriteServiceAccount,
-				Namespace: UserNamespace,
+				Namespace: obj.Namespace,
 			})
 		}
 		if createOp {
@@ -211,10 +211,10 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	////
 
 	// Get the username-password secret
-	// To do this, Firstly I have listed the secrets from userNamespace, then if that is our required secret -> captured it & decoded it.
+	// To do this, Firstly I have listed the secrets from obj.Namespace, then if that is our required secret -> captured it & decoded it.
 	var credentials v1.SecretList
 	var singleCred v1.Secret
-	err = r.Client.List(ctx, &credentials, &client.ListOptions{Namespace: UserNamespace})
+	err = r.Client.List(ctx, &credentials, &client.ListOptions{Namespace: obj.Namespace})
 	if err != nil {
 		log.Error(err, "Can't get the secret which has been created after vault approve command")
 		return ctrl.Result{}, err
@@ -225,7 +225,7 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			continue
 		}
 		err = r.Client.Get(ctx, types.NamespacedName{
-			Namespace: UserNamespace,
+			Namespace: obj.Namespace,
 			Name:      cr.Name,
 		}, &singleCred)
 		if err != nil {
@@ -244,21 +244,33 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
+	// Get the configMap
+	/*var userCm v1.ConfigMap
+	err = r.Client.Get(ctx, types.NamespacedName{
+		Namespace: "",
+		Name:      "",
+	}, &userCm)
+	if err != nil {
+		log.Error(err, "You have not created the configMap yet")
+		return ctrl.Result{}, err
+	}*/
+
 	// Job related things
 	createdJob, vt, err := clientutil.CreateOrPatch(r.Client, &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      JobName,
-			Namespace: UserNamespace,
+			Namespace: obj.Namespace,
 		},
 	}, func(object client.Object, createOp bool) client.Object {
 		job := object.(*batchv1.Job)
 
 		if len(job.Spec.Template.Spec.Volumes) == 0 {
 			job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, v1.Volume{
-				Name: VolumeNameForPod,
-				VolumeSource: v1.VolumeSource{
+				Name:         VolumeNameForPod,
+				VolumeSource: obj.Spec.Init.Script.VolumeSource,
+				/*
 					ConfigMap: &v1.ConfigMapVolumeSource{
-						LocalObjectReference: v1.LocalObjectReference{
+						/*LocalObjectReference: v1.LocalObjectReference{
 							Name: obj.Spec.Init.Script.ConfigMap.Name,
 						},
 						Items: []v1.KeyToPath{
@@ -267,8 +279,7 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 								Path: KeyPathForVolume,
 							},
 						},
-					},
-				},
+					},*/
 			})
 		}
 
@@ -303,30 +314,37 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 						Name:  "MONGODB_DATABASE_NAME",
 						Value: obj.Spec.DatabaseSchema.Name,
 					},
-					{ // Checking spec.init.script.configMap
-						Name: "HELLO",
-						ValueFrom: &v1.EnvVarSource{
-							ConfigMapKeyRef: &v1.ConfigMapKeySelector{
-								LocalObjectReference: v1.LocalObjectReference{
-									Name: obj.Spec.Init.Script.ConfigMap.Name,
+					/*
+						{ // Checking spec.init.script.configMap
+							Name: "HELLO",
+							ValueFrom: &v1.EnvVarSource{
+								ConfigMapKeyRef: &v1.ConfigMapKeySelector{
+									LocalObjectReference: v1.LocalObjectReference{
+										Name: obj.Spec.Init.Script.ConfigMap.Name,
+									},
+									Key: "hello",
 								},
-								Key: "hello",
 							},
-						},
-					},
+						},*/
 					{ // checking spec.init.pod_template.spec.env
 						Name:  obj.Spec.Init.PodTemplate.Spec.Env[0].Name,
 						Value: obj.Spec.Init.PodTemplate.Spec.Env[0].Value,
 					},
 				},
-				Command: []string{"/bin/sh"},
-				Args:    []string{"-c", "sleep 900"},
-				//Args:            []string{"-c", "mongo --host mongodb.db.svc.cluster.local --authenticationDatabase $MONGODB_DATABASE_NAME -u $MONGODB_USERNAME -p $MONGODB_PASSWORD"},
+				Command: []string{"/bin/sh", "-c"},
+				/*Args: []string{
+					"sleep 30; touch a.txt; sleep 300;",
+				},*/
+				Args: []string{
+					fmt.Sprintf("mongo --host mongodb.db.svc.cluster.local --authenticationDatabase $MONGODB_DATABASE_NAME -u $MONGODB_USERNAME -p $MONGODB_PASSWORD < %v/%v;", obj.Spec.Init.Script.ScriptPath, InitScriptName) +
+						"touch a.txt;" +
+						"sleep 300;",
+				},
 				ImagePullPolicy: v1.PullAlways,
 				VolumeMounts: []v1.VolumeMount{
 					{
 						Name:      VolumeNameForPod,
-						MountPath: VolumeMountPath,
+						MountPath: obj.Spec.Init.Script.ScriptPath,
 					},
 				},
 			})

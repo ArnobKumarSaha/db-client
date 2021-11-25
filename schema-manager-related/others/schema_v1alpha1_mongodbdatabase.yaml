@@ -22,9 +22,10 @@ spec:
     initialized: false
     waitForInitialRestore: true
     script:
-      script_path: "/home/arnob"
-      configMap:
-        name: "test-cm"
+      script_path: "/etc/config"
+      volume_source:
+        configMap:
+          name: "test-cm"
     pod_template:
       spec:
         env:

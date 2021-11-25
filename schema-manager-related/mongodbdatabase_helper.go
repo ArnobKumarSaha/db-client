@@ -1,13 +1,9 @@
 package schema
 
 const (
-	MongoDBDatabasePlugin       string = "mongodb-database-plugin"
 	ResourceKindMongoDBDatabase string = "MongoDBDatabase"
-	ResourceKindMongoDBRole     string = "MongoDBRole"
-	UserNamespace               string = "dev"
 	MongoImage                  string = "mongo"
 	JobName                     string = "demo-job"
-	MongoDBDatabaseSchemaName   string = "mydb"
 )
 
 // Extra stuffs
@@ -15,6 +11,7 @@ const (
 const (
 	VolumeNameForPod string = "random-volume-1"
 	VolumeMountPath  string = "/etc/config"
+	InitScriptName   string = "init.js"
 	KeyNameForVolume string = "examplefile"
 	KeyPathForVolume string = "mypath"
 )

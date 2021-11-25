@@ -85,8 +85,8 @@ type InitSpec struct {
 }
 
 type ScriptSourceSpec struct {
-	ScriptPath        string `json:"script_path,omitempty" protobuf:"bytes,1,opt,name=scriptPath"`
-	core.VolumeSource `json:",inline,omitempty" protobuf:"bytes,2,opt,name=volumeSource"`
+	ScriptPath   string            `json:"script_path,omitempty" protobuf:"bytes,1,opt,name=scriptPath"`
+	VolumeSource core.VolumeSource `json:"volume_source,omitempty" protobuf:"bytes,2,opt,name=volumeSource"`
 }
 
 type DeletionPolicy string
