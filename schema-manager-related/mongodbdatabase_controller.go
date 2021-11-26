@@ -38,6 +38,7 @@ import (
 	kvm_server "kubevault.dev/apimachinery/apis/kubevault/v1alpha1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 // MongoDBDatabaseReconciler reconciles a MongoDBDatabase object
@@ -76,6 +77,38 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	fmt.Println("Got the object successfully !", reqName, reqNamespace)
+
+	// Finalizer related things
+	myFinalizerName := "v1alpha1.kubedb.dev/finalizer"
+
+	// examine DeletionTimestamp to determine if object is under deletion
+	if obj.ObjectMeta.DeletionTimestamp.IsZero() {
+		// The object is not being deleted, so register our finalizer.
+		if !containsString(obj.GetFinalizers(), myFinalizerName) {
+			controllerutil.AddFinalizer(&obj, myFinalizerName)
+			if err := r.Update(ctx, &obj); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	} else {
+		// The object is being deleted
+		if containsString(obj.GetFinalizers(), myFinalizerName) {
+			// our finalizer is present, so lets handle any external dependency
+			if err := r.doExternalThingsBeforeDelete(&obj); err != nil {
+				// if fail to delete the external dependency here, return with error
+				// so that it can be retried
+				return ctrl.Result{}, err
+			}
+
+			// remove our finalizer from the list and update it.
+			controllerutil.RemoveFinalizer(&obj, myFinalizerName)
+			if err := r.Update(ctx, &obj); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		// Stop reconciliation as the item is being deleted
+		return ctrl.Result{}, nil
+	}
 
 	// Getting The Mongo Server object
 	var mongo kdm.MongoDB
@@ -263,6 +296,27 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 
+	// About Deletion
+	if obj.DeletionTimestamp != nil && obj.Spec.DeletionPolicy == schemav1alpha1.DeletionPolicyDelete {
+
+		/*var sars kvm_engine.SecretAccessRequestList
+		err = r.Client.List(ctx, &sars, &client.ListOptions{})
+		for _, ss := range sars.Items{
+			owners := ss.GetOwnerReferences()
+			for _, owner := range owners {
+				if owner.Name == obj.GetName() && owner.Kind == obj.Kind{
+
+				}
+			}
+		}
+		*/
+
+		if err = r.terminate(obj); err != nil {
+			log.Error(err, "Cant terminate the MongoDBDatabase Operator.")
+			return ctrl.Result{}, err
+		}
+	}
+
 	fmt.Println(fetchedSecretEngine.GetName(), vt, fetchedMongoDbRole.GetName(), fetchedAccessRequest.GetName(), fetchedServiceAccount.GetName(), createdJob.GetName())
 	return ctrl.Result{}, nil
 }
@@ -283,6 +337,8 @@ func makeImageNameFromVersion(version string) string {
 }
 
 func (r *MongoDBDatabaseReconciler) makeTheJob(obj schemav1alpha1.MongoDBDatabase, mongo kdm.MongoDB, singleCred v1.Secret) (client.Object, kutil.VerbType, error) {
+	givenPodSpec := obj.Spec.Init.PodTemplate.Spec
+	givenScript := obj.Spec.Init.Script
 
 	envList := []v1.EnvVar{
 		{
@@ -317,34 +373,34 @@ func (r *MongoDBDatabaseReconciler) makeTheJob(obj schemav1alpha1.MongoDBDatabas
 				ValueFrom: &v1.EnvVarSource{
 					ConfigMapKeyRef: &v1.ConfigMapKeySelector{
 						LocalObjectReference: v1.LocalObjectReference{
-							Name: obj.Spec.Init.Script.ConfigMap.Name,
+							Name: givenScript.ConfigMap.Name,
 						},
 						Key: "hello",
 					},
 				},
 			},*/
 	}
-	envList = core_util.UpsertEnvVars(envList, obj.Spec.Init.PodTemplate.Spec.Env...)
+	envList = core_util.UpsertEnvVars(envList, givenPodSpec.Env...)
 
 	argList := []string{
-		fmt.Sprintf("mongo --host %v.%v.svc.cluster.local --authenticationDatabase $MONGODB_DATABASE_NAME -u $MONGODB_USERNAME -p $MONGODB_PASSWORD < %v/%v;", mongo.ServiceName(), mongo.Namespace, obj.Spec.Init.Script.ScriptPath, InitScriptName) +
+		fmt.Sprintf("mongo --host %v.%v.svc.cluster.local --authenticationDatabase $MONGODB_DATABASE_NAME -u $MONGODB_USERNAME -p $MONGODB_PASSWORD < %v/%v;", mongo.ServiceName(), mongo.Namespace, givenScript.ScriptPath, InitScriptName) +
 			"touch a.txt;" +
 			"sleep 300;",
 	}
-	argList = meta_util.UpsertArgumentList(obj.Spec.Init.PodTemplate.Spec.Args, argList)
+	argList = meta_util.UpsertArgumentList(givenPodSpec.Args, argList)
 
 	var volumeMounts []v1.VolumeMount
 	volumeMounts = core_util.UpsertVolumeMount(volumeMounts, []v1.VolumeMount{
 		{
 			Name:      VolumeNameForPod,
-			MountPath: obj.Spec.Init.Script.ScriptPath,
+			MountPath: givenScript.ScriptPath,
 		},
 	}...)
 
 	var volumes []v1.Volume
 	volumes = core_util.UpsertVolume(volumes, v1.Volume{
 		Name:         VolumeNameForPod,
-		VolumeSource: obj.Spec.Init.Script.VolumeSource,
+		VolumeSource: givenScript.VolumeSource,
 	})
 
 	// Job related things
@@ -358,7 +414,7 @@ func (r *MongoDBDatabaseReconciler) makeTheJob(obj schemav1alpha1.MongoDBDatabas
 
 		job.Spec.Template.Spec.Volumes = core_util.UpsertVolume(job.Spec.Template.Spec.Volumes, volumes...)
 
-		initContainers := []v1.Container{
+		containers := []v1.Container{
 			{
 				Name:    MongoImage,
 				Image:   makeImageNameFromVersion(mongo.Spec.Version),
@@ -370,11 +426,33 @@ func (r *MongoDBDatabaseReconciler) makeTheJob(obj schemav1alpha1.MongoDBDatabas
 				Args:            argList,
 				ImagePullPolicy: v1.PullAlways,
 				VolumeMounts:    volumeMounts,
+
+				// Directly Add the specs, which are given by user
+				Resources:       givenPodSpec.Resources,
+				LivenessProbe:   givenPodSpec.LivenessProbe,
+				ReadinessProbe:  givenPodSpec.ReadinessProbe,
+				Lifecycle:       givenPodSpec.Lifecycle,
+				SecurityContext: givenPodSpec.ContainerSecurityContext,
 			},
 		}
+		job.Spec.Template.Spec.Containers = core_util.UpsertContainers(job.Spec.Template.Spec.Containers, containers)
 
-		job.Spec.Template.Spec.Containers = core_util.UpsertContainers(job.Spec.Template.Spec.Containers, initContainers)
-
+		job.Spec.Template.Spec.ServiceAccountName = givenPodSpec.ServiceAccountName
+		job.Spec.Template.Spec.NodeSelector = givenPodSpec.NodeSelector
+		job.Spec.Template.Spec.Affinity = givenPodSpec.Affinity
+		job.Spec.Template.Spec.SchedulerName = givenPodSpec.SchedulerName
+		job.Spec.Template.Spec.Tolerations = givenPodSpec.Tolerations
+		job.Spec.Template.Spec.ImagePullSecrets = givenPodSpec.ImagePullSecrets
+		job.Spec.Template.Spec.PriorityClassName = givenPodSpec.PriorityClassName
+		job.Spec.Template.Spec.Priority = givenPodSpec.Priority
+		job.Spec.Template.Spec.HostNetwork = givenPodSpec.HostNetwork
+		job.Spec.Template.Spec.HostPID = givenPodSpec.HostPID
+		job.Spec.Template.Spec.HostIPC = givenPodSpec.HostIPC
+		job.Spec.Template.Spec.ShareProcessNamespace = givenPodSpec.ShareProcessNamespace
+		job.Spec.Template.Spec.SecurityContext = givenPodSpec.SecurityContext
+		job.Spec.Template.Spec.DNSPolicy = givenPodSpec.DNSPolicy
+		job.Spec.Template.Spec.DNSConfig = givenPodSpec.DNSConfig
+		// InitContainers doesn't make any sense.
 		job.Spec.Template.Spec.RestartPolicy = v1.RestartPolicyOnFailure
 		job.Spec.BackoffLimit = func(i int32) *int32 { return &i }(5)
 
@@ -384,4 +462,27 @@ func (r *MongoDBDatabaseReconciler) makeTheJob(obj schemav1alpha1.MongoDBDatabas
 		return job
 	})
 	return createdJob, vt, err
+}
+
+func (r *MongoDBDatabaseReconciler) terminate(obj schemav1alpha1.MongoDBDatabase) error {
+	return nil
+}
+
+func (r *MongoDBDatabaseReconciler) doExternalThingsBeforeDelete(databaseObj *schemav1alpha1.MongoDBDatabase) error {
+	//
+	// delete any external resources associated with the obj
+	//
+	// Ensure that delete implementation is idempotent and safe to invoke
+	// multiple times for same object.
+	return nil
+}
+
+// Helper functions to check and remove string from a slice of strings.
+func containsString(slice []string, s string) bool {
+	for _, item := range slice {
+		if item == s {
+			return true
+		}
+	}
+	return false
 }

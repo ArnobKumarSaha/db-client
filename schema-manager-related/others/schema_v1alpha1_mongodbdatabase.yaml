@@ -29,6 +29,6 @@ spec:
     pod_template:
       spec:
         env:
-          - name: "have-a-try"
+          - name: "HAVE_A_TRY"
             value: "whoo! It works"
   deletion_policy: "Delete"
