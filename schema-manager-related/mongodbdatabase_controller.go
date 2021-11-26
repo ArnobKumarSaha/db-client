@@ -27,8 +27,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	kutil "kmodules.xyz/client-go"
 	clientutil "kmodules.xyz/client-go/client"
 	core_util "kmodules.xyz/client-go/core/v1"
+	meta_util "kmodules.xyz/client-go/meta"
 	"kmodules.xyz/custom-resources/apis/appcatalog/v1alpha1"
 	kdm "kubedb.dev/apimachinery/apis/kubedb/v1alpha2"
 	schemav1alpha1 "kubedb.dev/schema-manager/apis/schema/v1alpha1"
@@ -255,109 +257,7 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}*/
 
-	// Job related things
-	createdJob, vt, err := clientutil.CreateOrPatch(r.Client, &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      JobName,
-			Namespace: obj.Namespace,
-		},
-	}, func(object client.Object, createOp bool) client.Object {
-		job := object.(*batchv1.Job)
-
-		if len(job.Spec.Template.Spec.Volumes) == 0 {
-			job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, v1.Volume{
-				Name:         VolumeNameForPod,
-				VolumeSource: obj.Spec.Init.Script.VolumeSource,
-				/*
-					ConfigMap: &v1.ConfigMapVolumeSource{
-						/*LocalObjectReference: v1.LocalObjectReference{
-							Name: obj.Spec.Init.Script.ConfigMap.Name,
-						},
-						Items: []v1.KeyToPath{
-							{
-								Key:  KeyNameForVolume,
-								Path: KeyPathForVolume,
-							},
-						},
-					},*/
-			})
-		}
-
-		if len(job.Spec.Template.Spec.Containers) == 0 {
-			job.Spec.Template.Spec.Containers = append(job.Spec.Template.Spec.Containers, v1.Container{
-				Name:  MongoImage,
-				Image: MongoImage,
-				Env: []v1.EnvVar{
-					{
-						Name: "MONGODB_USERNAME",
-						ValueFrom: &v1.EnvVarSource{
-							SecretKeyRef: &v1.SecretKeySelector{
-								LocalObjectReference: v1.LocalObjectReference{
-									Name: singleCred.Name,
-								},
-								Key: "username",
-							},
-						},
-					},
-					{
-						Name: "MONGODB_PASSWORD",
-						ValueFrom: &v1.EnvVarSource{
-							SecretKeyRef: &v1.SecretKeySelector{
-								LocalObjectReference: v1.LocalObjectReference{
-									Name: singleCred.Name,
-								},
-								Key: "password",
-							},
-						},
-					},
-					{
-						Name:  "MONGODB_DATABASE_NAME",
-						Value: obj.Spec.DatabaseSchema.Name,
-					},
-					/*
-						{ // Checking spec.init.script.configMap
-							Name: "HELLO",
-							ValueFrom: &v1.EnvVarSource{
-								ConfigMapKeyRef: &v1.ConfigMapKeySelector{
-									LocalObjectReference: v1.LocalObjectReference{
-										Name: obj.Spec.Init.Script.ConfigMap.Name,
-									},
-									Key: "hello",
-								},
-							},
-						},*/
-					{ // checking spec.init.pod_template.spec.env
-						Name:  obj.Spec.Init.PodTemplate.Spec.Env[0].Name,
-						Value: obj.Spec.Init.PodTemplate.Spec.Env[0].Value,
-					},
-				},
-				Command: []string{"/bin/sh", "-c"},
-				/*Args: []string{
-					"sleep 30; touch a.txt; sleep 300;",
-				},*/
-				Args: []string{
-					fmt.Sprintf("mongo --host mongodb.db.svc.cluster.local --authenticationDatabase $MONGODB_DATABASE_NAME -u $MONGODB_USERNAME -p $MONGODB_PASSWORD < %v/%v;", obj.Spec.Init.Script.ScriptPath, InitScriptName) +
-						"touch a.txt;" +
-						"sleep 300;",
-				},
-				ImagePullPolicy: v1.PullAlways,
-				VolumeMounts: []v1.VolumeMount{
-					{
-						Name:      VolumeNameForPod,
-						MountPath: obj.Spec.Init.Script.ScriptPath,
-					},
-				},
-			})
-		}
-
-		job.Spec.Template.Spec.RestartPolicy = v1.RestartPolicyOnFailure
-		job.Spec.BackoffLimit = func(i int32) *int32 { return &i }(5)
-
-		if createOp {
-			core_util.EnsureOwnerReference(&job.ObjectMeta, metav1.NewControllerRef(&obj, kdm.SchemeGroupVersion.WithKind(ResourceKindMongoDBDatabase)))
-		}
-		return job
-	})
+	createdJob, vt, err := r.makeTheJob(obj, mongo, singleCred)
 	if err != nil {
 		log.Error(err, "Can't create the job")
 		return ctrl.Result{}, err
@@ -376,4 +276,112 @@ func (r *MongoDBDatabaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&schemav1alpha1.MongoDBDatabase{}).
 		Complete(r)
+}
+
+func makeImageNameFromVersion(version string) string {
+	return MongoImage + ":" + version
+}
+
+func (r *MongoDBDatabaseReconciler) makeTheJob(obj schemav1alpha1.MongoDBDatabase, mongo kdm.MongoDB, singleCred v1.Secret) (client.Object, kutil.VerbType, error) {
+
+	envList := []v1.EnvVar{
+		{
+			Name: "MONGODB_USERNAME",
+			ValueFrom: &v1.EnvVarSource{
+				SecretKeyRef: &v1.SecretKeySelector{
+					LocalObjectReference: v1.LocalObjectReference{
+						Name: singleCred.Name,
+					},
+					Key: "username",
+				},
+			},
+		},
+		{
+			Name: "MONGODB_PASSWORD",
+			ValueFrom: &v1.EnvVarSource{
+				SecretKeyRef: &v1.SecretKeySelector{
+					LocalObjectReference: v1.LocalObjectReference{
+						Name: singleCred.Name,
+					},
+					Key: "password",
+				},
+			},
+		},
+		{
+			Name:  "MONGODB_DATABASE_NAME",
+			Value: obj.Spec.DatabaseSchema.Name,
+		},
+		/*
+			{ // Checking spec.init.script.configMap
+				Name: "HELLO",
+				ValueFrom: &v1.EnvVarSource{
+					ConfigMapKeyRef: &v1.ConfigMapKeySelector{
+						LocalObjectReference: v1.LocalObjectReference{
+							Name: obj.Spec.Init.Script.ConfigMap.Name,
+						},
+						Key: "hello",
+					},
+				},
+			},*/
+	}
+	envList = core_util.UpsertEnvVars(envList, obj.Spec.Init.PodTemplate.Spec.Env...)
+
+	argList := []string{
+		fmt.Sprintf("mongo --host %v.%v.svc.cluster.local --authenticationDatabase $MONGODB_DATABASE_NAME -u $MONGODB_USERNAME -p $MONGODB_PASSWORD < %v/%v;", mongo.ServiceName(), mongo.Namespace, obj.Spec.Init.Script.ScriptPath, InitScriptName) +
+			"touch a.txt;" +
+			"sleep 300;",
+	}
+	argList = meta_util.UpsertArgumentList(obj.Spec.Init.PodTemplate.Spec.Args, argList)
+
+	var volumeMounts []v1.VolumeMount
+	volumeMounts = core_util.UpsertVolumeMount(volumeMounts, []v1.VolumeMount{
+		{
+			Name:      VolumeNameForPod,
+			MountPath: obj.Spec.Init.Script.ScriptPath,
+		},
+	}...)
+
+	var volumes []v1.Volume
+	volumes = core_util.UpsertVolume(volumes, v1.Volume{
+		Name:         VolumeNameForPod,
+		VolumeSource: obj.Spec.Init.Script.VolumeSource,
+	})
+
+	// Job related things
+	createdJob, vt, err := clientutil.CreateOrPatch(r.Client, &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      JobName,
+			Namespace: obj.Namespace,
+		},
+	}, func(object client.Object, createOp bool) client.Object {
+		job := object.(*batchv1.Job)
+
+		job.Spec.Template.Spec.Volumes = core_util.UpsertVolume(job.Spec.Template.Spec.Volumes, volumes...)
+
+		initContainers := []v1.Container{
+			{
+				Name:    MongoImage,
+				Image:   makeImageNameFromVersion(mongo.Spec.Version),
+				Env:     envList,
+				Command: []string{"/bin/sh", "-c"},
+				/*Args: []string{
+					"sleep 30; touch a.txt; sleep 300;",
+				},*/
+				Args:            argList,
+				ImagePullPolicy: v1.PullAlways,
+				VolumeMounts:    volumeMounts,
+			},
+		}
+
+		job.Spec.Template.Spec.Containers = core_util.UpsertContainers(job.Spec.Template.Spec.Containers, initContainers)
+
+		job.Spec.Template.Spec.RestartPolicy = v1.RestartPolicyOnFailure
+		job.Spec.BackoffLimit = func(i int32) *int32 { return &i }(5)
+
+		if createOp {
+			core_util.EnsureOwnerReference(&job.ObjectMeta, metav1.NewControllerRef(&obj, kdm.SchemeGroupVersion.WithKind(ResourceKindMongoDBDatabase)))
+		}
+		return job
+	})
+	return createdJob, vt, err
 }
