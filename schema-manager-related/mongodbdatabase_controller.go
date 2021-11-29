@@ -33,6 +33,7 @@ import (
 	meta_util "kmodules.xyz/client-go/meta"
 	"kmodules.xyz/custom-resources/apis/appcatalog/v1alpha1"
 	kdm "kubedb.dev/apimachinery/apis/kubedb/v1alpha2"
+	dbClient "kubedb.dev/db-client-go/mongodb"
 	schemav1alpha1 "kubedb.dev/schema-manager/apis/schema/v1alpha1"
 	kvm_engine "kubevault.dev/apimachinery/apis/engine/v1alpha1"
 	kvm_server "kubevault.dev/apimachinery/apis/kubevault/v1alpha1"
@@ -78,38 +79,6 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 	fmt.Println("Got the object successfully !", reqName, reqNamespace)
 
-	// Finalizer related things
-	myFinalizerName := "v1alpha1.kubedb.dev/finalizer"
-
-	// examine DeletionTimestamp to determine if object is under deletion
-	if obj.ObjectMeta.DeletionTimestamp.IsZero() {
-		// The object is not being deleted, so register our finalizer.
-		if !containsString(obj.GetFinalizers(), myFinalizerName) {
-			controllerutil.AddFinalizer(&obj, myFinalizerName)
-			if err := r.Update(ctx, &obj); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-	} else {
-		// The object is being deleted
-		if containsString(obj.GetFinalizers(), myFinalizerName) {
-			// our finalizer is present, so lets handle any external dependency
-			if err := r.doExternalThingsBeforeDelete(&obj); err != nil {
-				// if fail to delete the external dependency here, return with error
-				// so that it can be retried
-				return ctrl.Result{}, err
-			}
-
-			// remove our finalizer from the list and update it.
-			controllerutil.RemoveFinalizer(&obj, myFinalizerName)
-			if err := r.Update(ctx, &obj); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-		// Stop reconciliation as the item is being deleted
-		return ctrl.Result{}, nil
-	}
-
 	// Getting The Mongo Server object
 	var mongo kdm.MongoDB
 	err := r.Client.Get(ctx, types.NamespacedName{
@@ -132,6 +101,50 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 	log.Info("Mongo Object and VaultServer object both have been found.")
+
+	// Finalizer related things
+	myFinalizerName := "v1alpha1.kubedb.dev/finalizer"
+
+	// examine DeletionTimestamp to determine if object is under deletion
+	if obj.ObjectMeta.DeletionTimestamp.IsZero() {
+		// The object is not being deleted, so register our finalizer.
+		if !containsString(obj.GetFinalizers(), myFinalizerName) {
+			controllerutil.AddFinalizer(&obj, myFinalizerName)
+			if err := r.Update(ctx, &obj); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	} else {
+		// The object is being deleted
+		if containsString(obj.GetFinalizers(), myFinalizerName) {
+			fmt.Println("yoo yoo yoo")
+			// our finalizer is present, so lets handle any external dependency
+			mongoClient, err := dbClient.NewKubeDBClientBuilder(r.Client, &mongo).WithContext(ctx).GetMongoClient()
+			// WithReplSet(mongo.Spec.ReplicaSet.Name)
+			if err != nil {
+				log.Error(err, "Unable to run GetMongoClient() function")
+				return ctrl.Result{}, err
+			}
+			err = mongoClient.Database(obj.Spec.DatabaseSchema.Name).Drop(ctx)
+			if err != nil {
+				log.Error(err, "Can't drop the database")
+				return ctrl.Result{}, err
+			}
+			if err := r.doExternalThingsBeforeDelete(&obj); err != nil {
+				// if fail to delete the external dependency here, return with error
+				// so that it can be retried
+				return ctrl.Result{}, err
+			}
+			fmt.Println("Finalizer need to be removed now.")
+			// remove our finalizer from the list and update it.
+			controllerutil.RemoveFinalizer(&obj, myFinalizerName)
+			if err := r.Update(ctx, &obj); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		// Stop reconciliation as the item is being deleted
+		return ctrl.Result{}, nil
+	}
 
 	// Create or Patch the Secret Engine
 	fetchedSecretEngine, vt, err := clientutil.CreateOrPatch(r.Client, &kvm_engine.SecretEngine{
