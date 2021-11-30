@@ -65,8 +65,6 @@ type MongoDBDatabaseReconciler struct {
 func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("mongodbdatabase", req.NamespacedName)
 
-	// TODO(user): your logic here
-
 	// First Get the actual CRD object of type MongoDBDatabase
 	reqName, reqNamespace := req.Name, req.Namespace
 	var obj schemav1alpha1.MongoDBDatabase
@@ -102,50 +100,6 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 	log.Info("Mongo Object and VaultServer object both have been found.")
 
-	// Finalizer related things
-	myFinalizerName := "v1alpha1.kubedb.dev/finalizer"
-
-	// examine DeletionTimestamp to determine if object is under deletion
-	if obj.ObjectMeta.DeletionTimestamp.IsZero() {
-		// The object is not being deleted, so register our finalizer.
-		if !containsString(obj.GetFinalizers(), myFinalizerName) {
-			controllerutil.AddFinalizer(&obj, myFinalizerName)
-			if err := r.Update(ctx, &obj); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-	} else {
-		// The object is being deleted
-		if containsString(obj.GetFinalizers(), myFinalizerName) {
-			fmt.Println("yoo yoo yoo")
-			// our finalizer is present, so lets handle any external dependency
-			mongoClient, err := dbClient.NewKubeDBClientBuilder(r.Client, &mongo).WithContext(ctx).GetMongoClient()
-			// WithReplSet(mongo.Spec.ReplicaSet.Name)
-			if err != nil {
-				log.Error(err, "Unable to run GetMongoClient() function")
-				return ctrl.Result{}, err
-			}
-			err = mongoClient.Database(obj.Spec.DatabaseSchema.Name).Drop(ctx)
-			if err != nil {
-				log.Error(err, "Can't drop the database")
-				return ctrl.Result{}, err
-			}
-			if err := r.doExternalThingsBeforeDelete(&obj); err != nil {
-				// if fail to delete the external dependency here, return with error
-				// so that it can be retried
-				return ctrl.Result{}, err
-			}
-			fmt.Println("Finalizer need to be removed now.")
-			// remove our finalizer from the list and update it.
-			controllerutil.RemoveFinalizer(&obj, myFinalizerName)
-			if err := r.Update(ctx, &obj); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-		// Stop reconciliation as the item is being deleted
-		return ctrl.Result{}, nil
-	}
-
 	// Create or Patch the Secret Engine
 	fetchedSecretEngine, vt, err := clientutil.CreateOrPatch(r.Client, &kvm_engine.SecretEngine{
 		ObjectMeta: metav1.ObjectMeta{
@@ -157,9 +111,6 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 		se.Spec.VaultRef.Name = obj.Spec.VaultRef.Name
 		se.Spec.VaultRef.Namespace = obj.Spec.VaultRef.Namespace
-
-		//se.Spec.SecretEngineConfiguration.MongoDB.DatabaseRef.Name = obj.Spec.DatabaseRef.Name
-		//se.Spec.SecretEngineConfiguration.MongoDB.DatabaseRef.Namespace = obj.Spec.DatabaseRef.Namespace
 
 		se.Spec.SecretEngineConfiguration.MongoDB = &kvm_engine.MongoDBConfiguration{
 			DatabaseRef: v1alpha1.AppReference{
@@ -182,13 +133,13 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// CreateOrPatch the MongoDBRole
 	fetchedMongoDbRole, vt, err := clientutil.CreateOrPatch(r.Client, &kvm_engine.MongoDBRole{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      MongoReaderWriterRole,
+			Name:      MongoDBAdminRole,
 			Namespace: obj.Namespace,
 		},
 	}, func(object client.Object, createOp bool) client.Object {
 		mr := object.(*kvm_engine.MongoDBRole)
 		mr.Spec.SecretEngineRef.Name = makeSecretEngineName(obj.Name)
-		generatedString := fmt.Sprintf("{ \"db\": \"%s\", \"roles\": [{ \"role\": \"readWrite\" }] }", obj.Spec.DatabaseSchema.Name)
+		generatedString := fmt.Sprintf("{ \"db\": \"%s\", \"roles\": [{ \"role\": \"dbAdmin\" }] }", obj.Spec.DatabaseSchema.Name)
 		mr.Spec.CreationStatements = append(mr.Spec.CreationStatements, generatedString)
 
 		if createOp {
@@ -204,7 +155,7 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// a service account
 	fetchedServiceAccount, vt, err := clientutil.CreateOrPatch(r.Client, &v1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      MongoDbReadWriteServiceAccount,
+			Name:      MongoDBAdminServiceAccount,
 			Namespace: obj.Namespace,
 		},
 	}, func(object client.Object, createOp bool) client.Object {
@@ -222,26 +173,26 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Now make secret Access Request
 	fetchedAccessRequest, vt, err := clientutil.CreateOrPatch(r.Client, &kvm_engine.SecretAccessRequest{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      MongoDBReadWriteSecretAccessRequest,
+			Name:      MongoDBAdminSecretAccessRequest,
 			Namespace: obj.Namespace,
 		},
 	}, func(object client.Object, createOp bool) client.Object {
 		sar := object.(*kvm_engine.SecretAccessRequest)
 
 		sar.Spec.RoleRef.Kind = kvm_engine.ResourceKindMongoDBRole
-		sar.Spec.RoleRef.Name = MongoReaderWriterRole
+		sar.Spec.RoleRef.Name = MongoDBAdminRole
 
 		var accessRequestFound = false
 		for i := 0; i < len(sar.Spec.Subjects); i++ {
 			sub := sar.Spec.Subjects[i]
-			if sub.Name == MongoDbReadWriteServiceAccount {
+			if sub.Name == MongoDBAdminServiceAccount {
 				accessRequestFound = true
 			}
 		}
 		if !accessRequestFound {
 			sar.Spec.Subjects = append(sar.Spec.Subjects, rbac.Subject{
 				Kind:      rbac.ServiceAccountKind,
-				Name:      MongoDbReadWriteServiceAccount,
+				Name:      MongoDBAdminServiceAccount,
 				Namespace: obj.Namespace,
 			})
 		}
@@ -255,8 +206,8 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		log.Error(err, "Unable to createOrPatch the Secret Access request.")
 		return ctrl.Result{}, err
 	}
+
 	// Here we need to automate the vault approve command
-	////
 
 	// Get the username-password secret
 	// To do this, Firstly I have listed the secrets from obj.Namespace, then if that is our required secret -> captured it & decoded it.
@@ -269,7 +220,7 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 	for _, cr := range credentials.Items {
 		fmt.Println(cr.Name)
-		if !checkPrefixMatch(cr.Name, MongoDBReadWriteSecretAccessRequest) {
+		if !checkPrefixMatch(cr.Name, MongoDBAdminSecretAccessRequest) {
 			continue
 		}
 		err = r.Client.Get(ctx, types.NamespacedName{
@@ -280,28 +231,16 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			log.Error(err, "Unable to Get the required secret")
 			return ctrl.Result{}, err
 		}
-		fmt.Println("Listing the data from secret")
 		for k, v := range singleCred.Data {
 			str := b64.StdEncoding.EncodeToString(v)
 			val, err2 := b64.StdEncoding.DecodeString(str)
 			if err2 != nil {
-				log.Error(err, "Error occured when base64 decoding")
+				log.Error(err, "Error occurred when base64 decoding")
 				return ctrl.Result{}, err
 			}
 			fmt.Println(k, string(val))
 		}
 	}
-
-	// Get the configMap
-	/*var userCm v1.ConfigMap
-	err = r.Client.Get(ctx, types.NamespacedName{
-		Namespace: "",
-		Name:      "",
-	}, &userCm)
-	if err != nil {
-		log.Error(err, "You have not created the configMap yet")
-		return ctrl.Result{}, err
-	}*/
 
 	createdJob, vt, err := r.makeTheJob(obj, mongo, singleCred)
 	if err != nil {
@@ -309,44 +248,75 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 
-	// About Deletion
-	if obj.DeletionTimestamp != nil && obj.Spec.DeletionPolicy == schemav1alpha1.DeletionPolicyDelete {
 
-		/*var sars kvm_engine.SecretAccessRequestList
-		err = r.Client.List(ctx, &sars, &client.ListOptions{})
-		for _, ss := range sars.Items{
-			owners := ss.GetOwnerReferences()
-			for _, owner := range owners {
-				if owner.Name == obj.GetName() && owner.Kind == obj.Kind{
 
-				}
+	// Finalizer related things
+	myFinalizerName := "v1alpha1.kubedb.dev/finalizer"
+
+	// examine DeletionTimestamp to determine if object is under deletion
+	if obj.ObjectMeta.DeletionTimestamp.IsZero() {
+		// The object is not being deleted, so register our finalizer.
+		if !containsString(obj.GetFinalizers(), myFinalizerName) {
+			controllerutil.AddFinalizer(&obj, myFinalizerName)
+			if err := r.Update(ctx, &obj); err != nil {
+				return ctrl.Result{}, err
 			}
 		}
-		*/
+	} else if obj.Spec.DeletionPolicy == schemav1alpha1.DeletionPolicyDelete {
+		// The object is being deleted
+		if containsString(obj.GetFinalizers(), myFinalizerName) {
+			// Delete role, accessRequest, serviceAccount & SecretEngine one by one
+			err = r.Client.Delete(ctx, fetchedServiceAccount)
+			if err != nil {
+				log.Error(err, "Cant delete the ServiceAccount named %v", fetchedServiceAccount.GetName())
+				return ctrl.Result{}, err
+			}
 
-		if err = r.terminate(obj); err != nil {
-			log.Error(err, "Cant terminate the MongoDBDatabase Operator.")
-			return ctrl.Result{}, err
+			err = r.Client.Delete(ctx, fetchedMongoDbRole)
+			if err != nil {
+				log.Error(err, "Cant delete the MongoDBRole named %v", fetchedMongoDbRole.GetName())
+				return ctrl.Result{}, err
+			}
+
+			err = r.Client.Delete(ctx, fetchedAccessRequest)
+			if err != nil {
+				log.Error(err, "Cant delete the SecretAccessRequest named %v", fetchedAccessRequest.GetName())
+				return ctrl.Result{}, err
+			}
+
+			err = r.Client.Delete(ctx, fetchedSecretEngine)
+			if err != nil {
+				log.Error(err, "Cant delete the SecretEngine named %v", fetchedSecretEngine.GetName())
+				return ctrl.Result{}, err
+			}
+
+			if err := r.doExternalThingsBeforeDelete(ctx, &obj, &mongo, log); err != nil {
+				// if fail to delete the external dependency here, return with error
+				// so that it can be retried
+				return ctrl.Result{}, err
+			}
+			fmt.Println("Finalizer need to be removed now.")
+			// remove our finalizer from the list and update it.
+			controllerutil.RemoveFinalizer(&obj, myFinalizerName)
+			if err := r.Update(ctx, &obj); err != nil {
+				log.Error(err, "Cant update MongoDBDatabase object %v when removing finalizers %v", obj.GetName())
+				return ctrl.Result{}, err
+			}
 		}
+		// Stop reconciliation as the item is being deleted
+		return ctrl.Result{}, nil
 	}
+
 
 	fmt.Println(fetchedSecretEngine.GetName(), vt, fetchedMongoDbRole.GetName(), fetchedAccessRequest.GetName(), fetchedServiceAccount.GetName(), createdJob.GetName())
 	return ctrl.Result{}, nil
 }
-
-/*
-VaultServer -> MongoDBServer -> SecretEngine -> MongoDBRole -> SecretAccessRequest ->
-*/
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MongoDBDatabaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&schemav1alpha1.MongoDBDatabase{}).
 		Complete(r)
-}
-
-func makeImageNameFromVersion(version string) string {
-	return MongoImage + ":" + version
 }
 
 func (r *MongoDBDatabaseReconciler) makeTheJob(obj schemav1alpha1.MongoDBDatabase, mongo kdm.MongoDB, singleCred v1.Secret) (client.Object, kutil.VerbType, error) {
@@ -380,25 +350,11 @@ func (r *MongoDBDatabaseReconciler) makeTheJob(obj schemav1alpha1.MongoDBDatabas
 			Name:  "MONGODB_DATABASE_NAME",
 			Value: obj.Spec.DatabaseSchema.Name,
 		},
-		/*
-			{ // Checking spec.init.script.configMap
-				Name: "HELLO",
-				ValueFrom: &v1.EnvVarSource{
-					ConfigMapKeyRef: &v1.ConfigMapKeySelector{
-						LocalObjectReference: v1.LocalObjectReference{
-							Name: givenScript.ConfigMap.Name,
-						},
-						Key: "hello",
-					},
-				},
-			},*/
 	}
 	envList = core_util.UpsertEnvVars(envList, givenPodSpec.Env...)
 
 	argList := []string{
-		fmt.Sprintf("mongo --host %v.%v.svc.cluster.local --authenticationDatabase $MONGODB_DATABASE_NAME -u $MONGODB_USERNAME -p $MONGODB_PASSWORD < %v/%v;", mongo.ServiceName(), mongo.Namespace, givenScript.ScriptPath, InitScriptName) +
-			"touch a.txt;" +
-			"sleep 300;",
+		fmt.Sprintf("mongo --host %v.%v.svc.cluster.local --authenticationDatabase $MONGODB_DATABASE_NAME -u $MONGODB_USERNAME -p $MONGODB_PASSWORD < %v/%v;", mongo.ServiceName(), mongo.Namespace, givenScript.ScriptPath, InitScriptName),
 	}
 	argList = meta_util.UpsertArgumentList(givenPodSpec.Args, argList)
 
@@ -433,9 +389,6 @@ func (r *MongoDBDatabaseReconciler) makeTheJob(obj schemav1alpha1.MongoDBDatabas
 				Image:   makeImageNameFromVersion(mongo.Spec.Version),
 				Env:     envList,
 				Command: []string{"/bin/sh", "-c"},
-				/*Args: []string{
-					"sleep 30; touch a.txt; sleep 300;",
-				},*/
 				Args:            argList,
 				ImagePullPolicy: v1.PullAlways,
 				VolumeMounts:    volumeMounts,
@@ -477,25 +430,69 @@ func (r *MongoDBDatabaseReconciler) makeTheJob(obj schemav1alpha1.MongoDBDatabas
 	return createdJob, vt, err
 }
 
-func (r *MongoDBDatabaseReconciler) terminate(obj schemav1alpha1.MongoDBDatabase) error {
-	return nil
-}
-
-func (r *MongoDBDatabaseReconciler) doExternalThingsBeforeDelete(databaseObj *schemav1alpha1.MongoDBDatabase) error {
-	//
+func (r *MongoDBDatabaseReconciler) doExternalThingsBeforeDelete(ctx context.Context, obj *schemav1alpha1.MongoDBDatabase, mongo *kdm.MongoDB, log logr.Logger) error {
 	// delete any external resources associated with the obj
 	//
 	// Ensure that delete implementation is idempotent and safe to invoke
 	// multiple times for same object.
-	return nil
-}
+	// our finalizer is present, so lets handle any external dependency
+	mongoClient, err := dbClient.NewKubeDBClientBuilder(r.Client, mongo).WithContext(ctx).GetMongoClient()
+	// WithReplSet(mongo.Spec.ReplicaSet.Name)
+	if err != nil {
+		log.Error(err, "Unable to run GetMongoClient() function")
+		return err
+	}
+	err = mongoClient.Database(obj.Spec.DatabaseSchema.Name).Drop(ctx)
+	if err != nil {
+		log.Error(err, "Can't drop the database")
+		return err
+	}
 
-// Helper functions to check and remove string from a slice of strings.
-func containsString(slice []string, s string) bool {
-	for _, item := range slice {
-		if item == s {
-			return true
+	// Delete the pods those are owned by our Job & then delete the job itself
+	var pods v1.PodList
+	err = r.Client.List(ctx, &pods, &client.ListOptions{Namespace: obj.Namespace})
+	for _, pod := range pods.Items{
+		owners := pod.GetOwnerReferences()
+		for i := 0; i < len(owners); i++ {
+			if owners[i].Name == JobName{
+				err = r.Delete(ctx, &pod)
+				if err != nil {
+					log.Error(err , "Error occurred when deleting the %v pod", pod.Name)
+					return err
+				}
+			}
 		}
 	}
-	return false
+
+	err = r.Delete(ctx, &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: JobName,
+			Namespace: obj.Namespace,
+		},
+	})
+	if err != nil {
+		log.Error(err , "Error occurred when deleting the %v job", JobName)
+		return err
+	}
+
+	/*
+	// Delete secretAccessRequest
+	var sars kvm_engine.SecretAccessRequestList
+	err = r.Client.List(ctx, &sars, &client.ListOptions{
+		Namespace:     obj.Namespace,
+	})
+	for _, sar := range sars.Items{
+		owners := sar.GetOwnerReferences()
+		for i := 0; i < len(owners); i++ {
+			if owners[i].Name == obj.Name{
+				err = r.Delete(ctx, &sar)
+				if err != nil {
+					log.Error(err , "Error occurred when deleting the %v secretAccessRequest", sar.Name)
+					return err
+				}
+			}
+		}
+	}
+	*/
+	return nil
 }
