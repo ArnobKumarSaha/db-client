@@ -35,6 +35,8 @@ import (
 	kmapi "kmodules.xyz/client-go/api/v1"
 )
 
+// RunHealthChecker will be called from RunControllers() of controller.go.  Other funcs are internal
+
 func (c *Controller) RunHealthChecker(stopCh <-chan struct{}) {
 	// As CheckMongoDBHealth() is a blocking function,
 	// run it on a go-routine.
@@ -55,6 +57,32 @@ func (c *Controller) CheckMongoDBHealth(stopCh <-chan struct{}) {
 	}
 }
 
+db.createUser(
+	{
+	user: "myUserAdminWithBackupRestore",
+	pwd: "12345",
+	roles: [
+		{ role: "userAdminAnyDatabase", db: "admin"},
+		{ role: "readWriteAnyDatabase", db: "admin"}
+	]
+	}
+)
+/*
+CheckMongoDBHealthOnce list all the mongoDB objects. Then for each object :
+if not sharded:
+	GetMongoClient() for db.Hosts, if err -> updateErrorAcceptingConnections
+if sharded:
+	GetMongoClient() for db.ConfigSVR, if err -> updateErrorAcceptingConnections
+	GetMongoClient() for db.shardHosts, if err -> updateErrorAcceptingConnections. ping() the hosts, if err -> append those to shardPingErrors
+	GetMongoClient() for db.Mongos, if err -> updateErrorAcceptingConnections
+Update "AcceptingConnection" to "true" using util.UpdateMongoDBStatus() if all the clients generated successfully
+if not sharded:
+	ping() for db.Hosts, if ok -> updateDatabaseReady
+if sharded:
+	ping() for db.ConfigSVR, if ok -> updateDatabaseReady
+	ping() for db.shardHosts, desplay shardPingErrors
+	ping() for db.Mongos, if ok -> updateDatabaseReady
+ */
 func (c *Controller) CheckMongoDBHealthOnce() {
 	dbList, err := c.mgLister.MongoDBs(core.NamespaceAll).List(labels.Everything())
 	if err != nil {
@@ -230,10 +258,12 @@ func (c *Controller) CheckMongoDBHealthOnce() {
 			}
 		}()
 	}
-
 	wg.Wait()
 }
 
+/*
+Update "AcceptingConnection" & "Ready" to false using util.UpdateMongoDBStatus()
+ */
 func (c *Controller) updateErrorAcceptingConnections(db *api.MongoDB, connectionErr error) {
 	_, err := util.UpdateMongoDBStatus(
 		context.TODO(),
@@ -265,6 +295,9 @@ func (c *Controller) updateErrorAcceptingConnections(db *api.MongoDB, connection
 	}
 }
 
+/*
+Update "DatabaseReady" to true using util.UpdateMongoDBStatus()
+*/
 func (c *Controller) updateDatabaseReady(db *api.MongoDB) {
 	_, err := util.UpdateMongoDBStatus(
 		context.TODO(),

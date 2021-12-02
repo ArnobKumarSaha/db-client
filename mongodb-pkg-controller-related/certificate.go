@@ -28,6 +28,10 @@ import (
 	dynamic_util "kmodules.xyz/client-go/dynamic"
 )
 
+/*
+getTLSArgs will be called from statefulSet and mongos.go
+Then set the arguments with files from /var/run/mongodb/tls
+*/
 func (c *Reconciler) getTLSArgs(db *api.MongoDB, mgVersion *v1alpha1.MongoDBVersion) ([]string, error) {
 	var sslArgs []string
 	sslMode := string(db.Spec.SSLMode)
@@ -73,6 +77,12 @@ func (c *Reconciler) getTLSArgs(db *api.MongoDB, mgVersion *v1alpha1.MongoDBVers
 	return sslArgs, nil
 }
 
+/*
+IsCertificateSecretsCreated will be called from create() of mongodb.go
+if db.spec.TLS in nil, there is nothing to do
+List the secrets
+it uses GetCertSecretName for listing & dynamic_util.ResourcesExists for checking existence of the secrets
+*/
 func (c *Reconciler) IsCertificateSecretsCreated(db *api.MongoDB) (bool, error) {
 	// wait for certificates
 	if db.Spec.TLS != nil {

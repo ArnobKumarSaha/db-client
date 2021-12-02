@@ -4,7 +4,15 @@
     <option name="autoReloadType" value="ALL" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1ed0f9f9-7a15-42a2-9e6d-9e0380167229" name="Changes" comment="" />
+    <list default="true" id="1ed0f9f9-7a15-42a2-9e6d-9e0380167229" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/appbinding.go" beforeDir="false" afterPath="$PROJECT_DIR$/appbinding.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/certificate.go" beforeDir="false" afterPath="$PROJECT_DIR$/certificate.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client.go" beforeDir="false" afterPath="$PROJECT_DIR$/client.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/configsource.go" beforeDir="false" afterPath="$PROJECT_DIR$/configsource.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dormant.go" beforeDir="false" afterPath="$PROJECT_DIR$/dormant.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/health.go" beforeDir="false" afterPath="$PROJECT_DIR$/health.go" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -13,6 +21,9 @@
   <component name="GOROOT" url="file:///usr/local/go" />
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/.." />
+  </component>
+  <component name="HighlightingSettingsPerFile">
+    <setting file="file://$PROJECT_DIR$/client.go" root0="FORCE_HIGHLIGHTING" />
   </component>
   <component name="ProjectId" id="21SQqNIGRxQe3Ai10ZeXnDlNujW" />
   <component name="ProjectLevelVcsManager" settingsEditedManually="true" />
@@ -30,7 +41,7 @@
     <property name="go.import.settings.migrated" value="true" />
     <property name="go.modules.go.list.on.any.changes.was.set" value="true" />
     <property name="go.sdk.automatically.set" value="true" />
-    <property name="last_opened_file_path" value="$USER_HOME$" />
+    <property name="last_opened_file_path" value="$PROJECT_DIR$/../../../../kubedb.dev/schema-manager" />
     <property name="node.js.detected.package.eslint" value="true" />
     <property name="node.js.detected.package.tslint" value="true" />
     <property name="node.js.selected.package.eslint" value="(autodetect)" />

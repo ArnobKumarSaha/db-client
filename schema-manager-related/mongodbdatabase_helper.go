@@ -9,26 +9,11 @@ const (
 // Extra stuffs
 
 const (
-	VolumeNameForPod string = "random-volume-1"
-	InitScriptName   string = "init.js"
-	KeyNameForVolume string = "examplefile"
-	KeyPathForVolume string = "mypath"
-)
-const (
-	// Roles
-	MongoReaderWriterRole string = "mongodb-reader-writer-role"
-	MongoReaderRole       string = "mongodb-reader-role"
-	MongoDBAdminRole      string = "mongodb-db-admin-role"
-
-	// Secret Access requests
-	MongoDBReadWriteSecretAccessRequest string = "mongodb-read-write-access-req"
-	MongoDBReadSecretAccessRequest string = "mongodb-read-access-req"
-	MongoDBAdminSecretAccessRequest 	string = "mongodb-admin-access-req"
-
-	// Service Accounts
-	MongoDBReadWriteServiceAccount string = "mongodb-read-write-sa"
-	MongoDBReadServiceAccount string = "mongodb-read-sa"
-	MongoDBAdminServiceAccount 	   string = "mongodb-admin-sa"
+	VolumeNameForPod    string = "random-volume-1"
+	InitScriptName      string = "init.js"
+	KeyNameForVolume    string = "examplefile"
+	KeyPathForVolume    string = "mypath"
+	MongoInitScriptPath string = "/init-scripts"
 )
 
 func checkPrefixMatch(secretName, accessRequestName string) bool {
@@ -43,14 +28,33 @@ func checkPrefixMatch(secretName, accessRequestName string) bool {
 	return true
 }
 
-func makeSecretEngineName(name string) string {
-	return name + "-secret-engine"
+const MongoPrefix = "-mongo"
+
+// For Admin
+func getMongoAdminRoleName(dbName string) string {
+	return dbName + MongoPrefix + "-admin-role"
 }
-func makeImageNameFromVersion(version string) string {
-	return MongoImage + ":" + version
+func getMongoAdminSecretAccessRequestName(dbName string) string {
+	return dbName + MongoPrefix + "-admin-secret-access-req"
+}
+func getMongoAdminServiceAccountName(dbName string) string {
+	return dbName + MongoPrefix + "-admin-service-account"
 }
 
+// For Read-write
+func getMongoReadWriteRoleName(dbName string) string {
+	return dbName + MongoPrefix + "-read-write-role"
+}
+func getMongoReadWriteSecretAccessRequestName(dbName string) string {
+	return dbName + MongoPrefix + "-read-write-secret-access-req"
+}
+func getMongoReadWriteServiceAccountName(dbName string) string {
+	return dbName + MongoPrefix + "-read-write-service-account"
+}
 
+func getMongoSecretEngineName(name string) string {
+	return name + MongoPrefix + "-secret-engine"
+}
 
 // Helper functions to check and remove string from a slice of strings.
 func containsString(slice []string, s string) bool {

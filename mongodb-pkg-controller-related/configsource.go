@@ -26,9 +26,13 @@ import (
 	meta_util "kmodules.xyz/client-go/meta"
 )
 
-// Initially mount configmap `mongodb.conf` on initialConfigDirectoryPath "/configdb-readonly".
-// But, mongodb can't write this initial mounted file. Because, configmap mounted files is not writable.
-// So, This initial file is copied to configDirectoryPath "/data/configdb" by init-container.
+/* this fuction will be called from ensureStatefulSet() of statefulSet.go
+Initially mount configmap `mongodb.conf` on initialConfigDirectoryPath "/configdb-readonly".
+But, mongodb can't write this initial mounted file. Because, configmap mounted files is not writable.
+So, This initial file is copied to configDirectoryPath "/data/configdb" by init-container.
+
+It basically upserts the argumentList, volume & volumeMount in template.spec
+ */
 func (c *Reconciler) upsertConfigSecretVolume(template core.PodTemplateSpec, configSecret *core.LocalObjectReference) core.PodTemplateSpec {
 	for i, container := range template.Spec.Containers {
 		if container.Name == api.MongoDBContainerName {

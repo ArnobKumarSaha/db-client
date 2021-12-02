@@ -1,34 +1,34 @@
 apiVersion: schema.kubedb.com/v1alpha1
 kind: MongoDBDatabase
 metadata:
-  name: mongodbdatabase-sample
+  name: sample
   namespace: dev
 spec:
-  database_ref:
-    dbref_name: "mongodb"
-    dbref_namespace: "db"
-  vault_ref:
-    vaultref_name: "vault"
-    vaultref_namespace: "demo"
-  database_schema:
-    dbschema_name: "mydb"
+  databaseRef:
+    name: "mongodb"
+    namespace: "db"
+  vaultRef:
+    name: "vault"
+    namespace: "demo"
+  databaseSchema:
+    name: "mydb"
   subjects:
-    - subject_name: "sa_name"
-      subject_kind:
+    - name: "sa_name"
+      kind:
         apiVersion: "v1"
         kind: "ServiceAccount"
-      subject_namespace: "dev"
+      namespace: "dev"
   init:
     initialized: false
     waitForInitialRestore: true
     script:
-      script_path: "/etc/config"
-      volume_source:
+      scriptPath: "/etc/config"
+      volumeSource:
         configMap:
           name: "test-cm"
-    pod_template:
+    podTemplate:
       spec:
         env:
           - name: "HAVE_A_TRY"
             value: "whoo! It works"
-  deletion_policy: "Delete"
+  deletionPolicy: "Delete"

@@ -36,6 +36,18 @@ import (
 	"k8s.io/klog/v2"
 )
 
+/*
+CreateTLSUsers &  SetupReplicaSetsConfig will be called from create() of mongodb.go
+ */
+
+/*
+CreateTLSUsers gets the secret which contains the client Certificate
+Decode and parse it
+if sharded :
+	createTLSUser for MongosHosts & ShardHosts
+else :
+	createTLSUser for Hosts
+ */
 func (c *Reconciler) CreateTLSUsers(db *api.MongoDB) error {
 	secretName := db.GetCertSecretName(api.MongoDBClientCert, "")
 	certSecret, err := c.Client.CoreV1().Secrets(db.Namespace).Get(context.TODO(), secretName, metav1.GetOptions{})
@@ -75,6 +87,10 @@ func (c *Reconciler) CreateTLSUsers(db *api.MongoDB) error {
 	return nil
 }
 
+/*
+CreateTLSUser gets the mongoClient for given url & replicaset name
+RunCommand() to actually create TLSUser
+ */
 func (c *Reconciler) CreateTLSUser(db *api.MongoDB, url, repSetName, tlsUserName string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
@@ -124,6 +140,12 @@ func (c *Reconciler) CreateTLSUser(db *api.MongoDB, url, repSetName, tlsUserName
 	return nil
 }
 
+/*
+if shared:
+	SetupReplicaSetConfig for ConfigSvrHosts & ShardHosts
+else:
+	SetupReplicaSetConfig for Hosts
+ */
 func (c *Reconciler) SetupReplicaSetsConfig(db *api.MongoDB) error {
 	if db.Spec.ShardTopology != nil {
 		err := c.SetupReplicaSetConfig(db, strings.Join(db.ConfigSvrHosts(), ","), db.ConfigSvrRepSetName(), db.Spec.ShardTopology.ConfigServer.ConfigSecret)
@@ -147,6 +169,12 @@ func (c *Reconciler) SetupReplicaSetsConfig(db *api.MongoDB) error {
 	return nil
 }
 
+/*
+SetupReplicaSetConfig first gets the ConfigSecret by its name
+Then it gets the mongoClient from given url & replicaset name
+Use RunCommand() to get the replSetGetConfig
+merge the user-provided configs with it, save that to db with RunCommand() replSetReconfig
+*/
 func (c *Reconciler) SetupReplicaSetConfig(db *api.MongoDB, url, repSetName string, configSecretRef *core.LocalObjectReference) error {
 	if configSecretRef == nil {
 		return nil

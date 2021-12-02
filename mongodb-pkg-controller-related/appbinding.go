@@ -39,6 +39,15 @@ import (
 	"stash.appscode.dev/apimachinery/pkg/restic"
 )
 
+// ensureAppBinding will be called from create() of mongodb.go
+// And GetPrimaryServicePort will only be called from ensureAppBinding
+
+/*
+make meta, appMeta, owner variable.  Get the mongodbVersion
+Make a MongoDBConfiguration, set its configServer & replicaSet accordingly ..  to set that into AppBinding.Parameter
+if ssl mode is on, get the tlsCertificate from clientCert, & assing that in ApppBinding.ClientConfig.CABundle
+finally call CreateOrPatchAppBinding()
+ */
 func (c *Controller) ensureAppBinding(db *api.MongoDB) (kutil.VerbType, error) {
 	port, err := c.GetPrimaryServicePort(db)
 	if err != nil {
@@ -146,6 +155,10 @@ func (c *Controller) ensureAppBinding(db *api.MongoDB) (kutil.VerbType, error) {
 	return vt, nil
 }
 
+/*
+Get the serviceTemplate from db.spec with alias name == "primary"
+and get the ports of primaryServiceTemplate from its spec, patch primaryServicePort accordingly, finally return it
+ */
 func (c *Controller) GetPrimaryServicePort(db *api.MongoDB) (int32, error) {
 	ports := ofst.PatchServicePorts([]core.ServicePort{
 		{

@@ -31,13 +31,13 @@ type MongoDBDatabaseSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// The reference to the Database of kind apimachinery/apis/kubedb
-	DatabaseRef DatabaseRef `json:"database_ref,omitempty"`
+	DatabaseRef DatabaseRef `json:"databaseRef,omitempty"`
 
 	// Reference to the VaultServer
-	VaultRef VaultRef `json:"vault_ref,omitempty"`
+	VaultRef VaultRef `json:"vaultRef,omitempty"`
 
 	// To assing an actual database instance to an user
-	DatabaseSchema DatabaseSchema `json:"database_schema,omitempty"`
+	DatabaseSchema DatabaseSchema `json:"databaseSchema,omitempty"`
 
 	// The list of ServiceAccounts those will have some certain roles
 	Subjects []Subject `json:"subjects,omitempty"`
@@ -48,27 +48,27 @@ type MongoDBDatabaseSpec struct {
 
 	// DeletionPolicy controls the delete operation for database
 	// +optional
-	DeletionPolicy DeletionPolicy `json:"deletion_policy,omitempty"`
+	DeletionPolicy DeletionPolicy `json:"deletionPolicy,omitempty"`
 }
 
 type DatabaseRef struct {
-	Name      string `json:"dbref_name"`
-	Namespace string `json:"dbref_namespace"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
 }
 
 type VaultRef struct {
-	Name      string `json:"vaultref_name"`
-	Namespace string `json:"vaultref_namespace"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
 }
 
 type DatabaseSchema struct {
-	Name string `json:"dbschema_name"`
+	Name string `json:"name"`
 }
 
 type Subject struct {
-	SubjectKind metav1.TypeMeta `json:"subject_kind"`
-	Name        string          `json:"subject_name"`
-	Namespace   string          `json:"subject_namespace"`
+	SubjectKind metav1.TypeMeta `json:"kind"`
+	Name        string          `json:"name"`
+	Namespace   string          `json:"namespace"`
 }
 
 type InitSpec struct {
@@ -81,22 +81,13 @@ type InitSpec struct {
 	Script                *ScriptSourceSpec `json:"script,omitempty" protobuf:"bytes,1,opt,name=scriptPath"`
 
 	// This will take some database related config from the user
-	PodTemplate v1.PodTemplateSpec `json:"pod_template,omitempty"`
+	PodTemplate *v1.PodTemplateSpec `json:"podTemplate,omitempty"`
 }
 
 type ScriptSourceSpec struct {
-	ScriptPath   string            `json:"script_path,omitempty" protobuf:"bytes,1,opt,name=scriptPath"`
-	VolumeSource core.VolumeSource `json:"volume_source,omitempty" protobuf:"bytes,2,opt,name=volumeSource"`
+	ScriptPath   string            `json:"scriptPath,omitempty" protobuf:"bytes,1,opt,name=scriptPath"`
+	VolumeSource core.VolumeSource `json:"volumeSource,omitempty" protobuf:"bytes,2,opt,name=volumeSource"`
 }
-
-type DeletionPolicy string
-
-const (
-	// DeletionPolicyDelete Deletes database pods, service, pvcs and stash backup data.
-	DeletionPolicyDelete DeletionPolicy = "Delete"
-	// DeletionPolicyDoNotTerminate Rejects attempt to delete database using ValidationWebhook.
-	DeletionPolicyDoNotTerminate DeletionPolicy = "DoNotDelete"
-)
 
 // MongoDBDatabaseStatus defines the observed state of MongoDBDatabase
 type MongoDBDatabaseStatus struct {
