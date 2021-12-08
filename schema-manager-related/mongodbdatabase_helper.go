@@ -1,34 +1,26 @@
 package schema
 
-const (
-	ResourceKindMongoDBDatabase string = "MongoDBDatabase"
-	MongoImage                  string = "mongo"
-	JobName                     string = "demo-job"
+import (
+	kvm_engine "kubevault.dev/apimachinery/apis/engine/v1alpha1"
 )
 
-// Extra stuffs
-
 const (
-	VolumeNameForPod    string = "random-volume-1"
-	InitScriptName      string = "init.js"
-	KeyNameForVolume    string = "examplefile"
-	KeyPathForVolume    string = "mypath"
-	MongoInitScriptPath string = "/init-scripts"
+	KubeDBSchemaManagerFinalizerName string = "v1alpha1.kubedb.dev/finalizer"
+	ResourceKindMongoDBDatabase      string = "MongoDBDatabase"
+	MongoInitContainerNameForPod     string = "mongo-init-container"
+	MongoInitJobName                 string = "init-job"
+	MongoInitVolumeNameForPod        string = "init-volume"
+	InitScriptName                   string = "init.js"
+	MongoInitScriptPath              string = "/init-scripts"
+	MongoPrefix                      string = "-mongo"
+	MongoDatabaseNameForEntry        string = "kubedb-system"
+	MongoCollectionNameForEntry      string = "databases"
 )
 
-func checkPrefixMatch(secretName, accessRequestName string) bool {
-	if len(accessRequestName) > len(secretName) {
-		return false
-	}
-	for i := 0; i < len(accessRequestName); i++ {
-		if accessRequestName[i] != secretName[i] {
-			return false
-		}
-	}
-	return true
-}
-
-const MongoPrefix = "-mongo"
+const (
+	SecretEnginePhaseSuccess    kvm_engine.SecretEnginePhase = "Success"
+	SecretEnginePhaseProcessing kvm_engine.SecretEnginePhase = "Processing"
+)
 
 // For Admin
 func getMongoAdminRoleName(dbName string) string {

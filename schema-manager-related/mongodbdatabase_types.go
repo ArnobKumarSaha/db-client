@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	apiv1 "kmodules.xyz/client-go/api/v1"
 	v1 "kmodules.xyz/offshoot-api/api/v1"
 )
 
@@ -46,9 +47,19 @@ type MongoDBDatabaseSpec struct {
 	// +optional
 	Init *InitSpec `json:"init,omitempty"`
 
+	// For restore using stash
+	// +optional
+	Restore *RestoreRef `json:"restore,omitempty"`
+	//Restore *stash.RestoreSessionSpec `json:"restore,omitempty"`
+
 	// DeletionPolicy controls the delete operation for database
 	// +optional
 	DeletionPolicy DeletionPolicy `json:"deletionPolicy,omitempty"`
+}
+
+type RestoreRef struct {
+	Repository apiv1.ObjectReference `json:"repository,omitempty"`
+	Snapshot   string                `json:"snapshot,omitempty"`
 }
 
 type DatabaseRef struct {
