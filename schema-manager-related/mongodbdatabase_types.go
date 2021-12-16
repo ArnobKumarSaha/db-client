@@ -32,10 +32,10 @@ type MongoDBDatabaseSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// The reference to the Database of kind apimachinery/apis/kubedb
-	DatabaseRef DatabaseRef `json:"databaseRef,omitempty"`
+	DatabaseRef apiv1.ObjectReference `json:"databaseRef,omitempty"`
 
 	// Reference to the VaultServer
-	VaultRef VaultRef `json:"vaultRef,omitempty"`
+	VaultRef apiv1.ObjectReference `json:"vaultRef,omitempty"`
 
 	// To assing an actual database instance to an user
 	DatabaseSchema DatabaseSchema `json:"databaseSchema,omitempty"`
@@ -50,26 +50,19 @@ type MongoDBDatabaseSpec struct {
 	// For restore using stash
 	// +optional
 	Restore *RestoreRef `json:"restore,omitempty"`
-	//Restore *stash.RestoreSessionSpec `json:"restore,omitempty"`
 
 	// DeletionPolicy controls the delete operation for database
 	// +optional
 	DeletionPolicy DeletionPolicy `json:"deletionPolicy,omitempty"`
+
+	// AutoApproval should be set to true if DB admin wants to create database
+	// credentials without approving by "kubectl vault approve" command. Should be set to false otherwise
+	AutoApproval bool `json:"autoApproval,omitempty"`
 }
 
 type RestoreRef struct {
 	Repository apiv1.ObjectReference `json:"repository,omitempty"`
 	Snapshot   string                `json:"snapshot,omitempty"`
-}
-
-type DatabaseRef struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-}
-
-type VaultRef struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
 }
 
 type DatabaseSchema struct {
@@ -87,9 +80,8 @@ type InitSpec struct {
 	// This will be set by the operator when status.conditions["Provisioned"] is set to ensure
 	// that database is not mistakenly reset when recovered using disaster recovery tools.
 	Initialized bool `json:"initialized,omitempty" protobuf:"varint,1,opt,name=initialized"`
-	// Wait for initial DataRestore condition
-	WaitForInitialRestore bool              `json:"waitForInitialRestore,omitempty" protobuf:"varint,2,opt,name=waitForInitialRestore"`
-	Script                *ScriptSourceSpec `json:"script,omitempty" protobuf:"bytes,1,opt,name=scriptPath"`
+
+	Script *ScriptSourceSpec `json:"script,omitempty" protobuf:"bytes,1,opt,name=scriptPath"`
 
 	// This will take some database related config from the user
 	PodTemplate *v1.PodTemplateSpec `json:"podTemplate,omitempty"`
@@ -100,10 +92,22 @@ type ScriptSourceSpec struct {
 	VolumeSource core.VolumeSource `json:"volumeSource,omitempty" protobuf:"bytes,2,opt,name=volumeSource"`
 }
 
+func (db *MongoDBDatabase) SetCondition(typ string, sts core.ConditionStatus, reason string, msg string) {
+	db.Status.Conditions = apiv1.SetCondition(db.Status.Conditions, apiv1.Condition{
+		Type:               typ,
+		Status:             sts,
+		LastTransitionTime: metav1.Time{},
+		Reason:             reason,
+		Message:            msg,
+	})
+}
+
 // MongoDBDatabaseStatus defines the observed state of MongoDBDatabase
 type MongoDBDatabaseStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+	Phase      SchemaDatabasePhase `json:"phase,omitempty"`
+	Conditions []apiv1.Condition   `json:"conditions,omitempty"`
 }
 
 //+kubebuilder:object:root=true

@@ -5,17 +5,26 @@ import (
 )
 
 const (
-	KubeDBSchemaManagerFinalizerName string = "v1alpha1.kubedb.dev/finalizer"
-	ResourceKindMongoDBDatabase      string = "MongoDBDatabase"
-	MongoInitContainerNameForPod     string = "mongo-init-container"
-	MongoInitJobName                 string = "init-job"
-	MongoInitVolumeNameForPod        string = "init-volume"
-	InitScriptName                   string = "init.js"
-	MongoInitScriptPath              string = "/init-scripts"
-	MongoPrefix                      string = "-mongo"
-	MongoDatabaseNameForEntry        string = "kubedb-system"
-	MongoCollectionNameForEntry      string = "databases"
+	ResourceKindMongoDBDatabase string = "MongoDBDatabase"
+	InitScriptName              string = "init.js"
+	MongoInitScriptPath         string = "/init-scripts"
+	MongoPrefix                 string = "-mongo"
+	MongoDatabaseNameForEntry   string = "kubedb-system"
+	MongoCollectionNameForEntry string = "databases"
 )
+
+func getMongoInitVolumeNameForPod(dbName string) string {
+	return dbName + "-init-volume"
+}
+func getMongoInitJobName(dbName string) string {
+	return dbName + "-init-job"
+}
+func getMongoInitContainerNameForPod(dbName string) string {
+	return dbName + "-init-container"
+}
+func getMongoRestoreSessionName(dbName string) string {
+	return dbName + "-restore-session"
+}
 
 const (
 	SecretEnginePhaseSuccess    kvm_engine.SecretEnginePhase = "Success"
@@ -46,6 +55,10 @@ func getMongoReadWriteServiceAccountName(dbName string) string {
 
 func getMongoSecretEngineName(name string) string {
 	return name + MongoPrefix + "-secret-engine"
+}
+
+func getAuthSecretName(name string) string {
+	return name + "-auth"
 }
 
 // Helper functions to check and remove string from a slice of strings.
