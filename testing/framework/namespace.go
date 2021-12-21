@@ -2,7 +2,6 @@ package framework
 
 import (
 	"context"
-	"fmt"
 	core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	meta_util "kmodules.xyz/client-go/meta"
@@ -19,7 +18,6 @@ func (f *Framework) CreateNamespace() error {
 		},
 	}
 	_, err := f.kubeClient.CoreV1().Namespaces().Create(context.TODO(), obj, metav1.CreateOptions{})
-	fmt.Println("***********************", err)
 	return err
 }
 

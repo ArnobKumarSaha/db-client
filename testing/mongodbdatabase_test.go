@@ -16,8 +16,7 @@ var _ = Describe("Mongodbdatabase", func() {
 	Describe("Categorizing book length", func() {
 		Context("With more than 300 pages", func() {
 			It("should be a novel", func() {
-				//Expect(x.Invoke()).To(Equal("NOVEL"))
-				Expect(x.Checker()).To(Equal("true"))
+				Expect(x.Checker()).To(Equal(true))
 			})
 		})
 	})

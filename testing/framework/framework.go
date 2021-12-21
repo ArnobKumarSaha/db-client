@@ -46,7 +46,6 @@ func (f *Framework) Invoke() *Invocation {
 
 func (i *Invocation) Checker() bool {
 	return true
-	//return false
 }
 
 type Invocation struct {

@@ -17,11 +17,13 @@ limitations under the License.
 package schema
 
 import (
+	"context"
 	"flag"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/homedir"
+	schemav1alpha1 "kubedb.dev/schema-manager/apis/schema/v1alpha1"
 	"kubedb.dev/schema-manager/controllers/schema/framework"
 	"path/filepath"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -70,13 +72,14 @@ func TestAPIs(t *testing.T) {
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(clientSetScheme.AddToScheme(scheme))
+	utilruntime.Must(schemav1alpha1.AddToScheme(scheme))
 }
 
 var _ = BeforeSuite(func() {
 	config, err := clientcmd.BuildConfigFromContext(kubeconfigPath, "")
 	Expect(err).NotTo(HaveOccurred())
 
-	// manager
+	// manager (taken from main)
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
@@ -103,6 +106,10 @@ var _ = BeforeSuite(func() {
 		SyncPeriod:             &time,
 	})
 	Expect(err).NotTo(HaveOccurred())
+	go func() {
+		err = mgr.Start(context.TODO())
+		Expect(err).ToNot(HaveOccurred(), "failed to run manager")
+	}()
 
 	// Clients
 	kubeClient := kubernetes.NewForConfigOrDie(config)

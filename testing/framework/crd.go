@@ -2,7 +2,6 @@ package framework
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	. "github.com/onsi/gomega"
 	smv1a1 "kubedb.dev/schema-manager/apis/schema/v1alpha1"
@@ -18,11 +17,11 @@ func (f *Framework) EventuallyCRD() GomegaAsyncAssertion {
 			err := f.myClient.List(context.TODO(), &schemas, &client.ListOptions{Namespace: f.Namespace()})
 			fmt.Println("schemas : ", schemas, "ns : ", f.Namespace())
 			if err != nil {
-				return errors.New("CRD Instances is not ready")
+				return err //errors.New("CRD Instances is not ready")
 			}
 			return nil
 		},
-		time.Minute*2,
+		time.Minute*1,
 		time.Second*10,
 	)
 }
