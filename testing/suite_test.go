@@ -25,20 +25,19 @@ import (
 	"k8s.io/client-go/util/homedir"
 	schemav1alpha1 "kubedb.dev/schema-manager/apis/schema/v1alpha1"
 	"kubedb.dev/schema-manager/controllers/schema/framework"
+	kubevaultscheme "kubevault.dev/apimachinery/client/clientset/versioned/scheme"
 	"path/filepath"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	clientSetScheme "k8s.io/client-go/kubernetes/scheme"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/rest"
+	clientGoScheme "k8s.io/client-go/kubernetes/scheme"
 	"kmodules.xyz/client-go/tools/clientcmd"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/envtest"
+	kubedbscheme "kubedb.dev/apimachinery/client/clientset/versioned/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/envtest/printer"
 	//+kubebuilder:scaffold:imports
 )
@@ -47,11 +46,7 @@ import (
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
 var (
-	cfg       *rest.Config
-	k8sClient client.Client
-	testEnv   *envtest.Environment
-	root      *framework.Framework
-
+	//Root      *framework.Framework
 	scheme         = runtime.NewScheme()
 	kubeconfigPath = filepath.Join(homedir.HomeDir(), ".kube", "config")
 )
@@ -70,16 +65,13 @@ func TestAPIs(t *testing.T) {
 }
 
 func init() {
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(clientSetScheme.AddToScheme(scheme))
+	utilruntime.Must(clientGoScheme.AddToScheme(scheme))
 	utilruntime.Must(schemav1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kubedbscheme.AddToScheme(scheme))
+	utilruntime.Must(kubevaultscheme.AddToScheme(scheme))
 }
 
-var _ = BeforeSuite(func() {
-	config, err := clientcmd.BuildConfigFromContext(kubeconfigPath, "")
-	Expect(err).NotTo(HaveOccurred())
-
-	// manager (taken from main)
+func getManager() manager.Manager {
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
@@ -106,6 +98,13 @@ var _ = BeforeSuite(func() {
 		SyncPeriod:             &time,
 	})
 	Expect(err).NotTo(HaveOccurred())
+	return mgr
+}
+
+var _ = BeforeSuite(func() {
+	config, err := clientcmd.BuildConfigFromContext(kubeconfigPath, "")
+	Expect(err).NotTo(HaveOccurred())
+	mgr := getManager()
 	go func() {
 		err = mgr.Start(context.TODO())
 		Expect(err).ToNot(HaveOccurred(), "failed to run manager")
@@ -114,21 +113,21 @@ var _ = BeforeSuite(func() {
 	// Clients
 	kubeClient := kubernetes.NewForConfigOrDie(config)
 	myClient := mgr.GetClient()
-	root = framework.New(config, kubeClient, myClient)
+	framework.RootFramework = framework.New(config, kubeClient, myClient)
 
 	//+kubebuilder:scaffold:scheme
 
 	// Create namespace
-	By("Using namespace " + root.Namespace())
-	err = root.CreateNamespace()
+	By("Using namespace " + framework.RootFramework.Namespace())
+	err = framework.RootFramework.CreateNamespace()
 	Expect(err).NotTo(HaveOccurred())
 
-	root.EventuallyCRD().Should(Succeed())
+	framework.RootFramework.EventuallyCRD().Should(Succeed())
 
 }, 60)
 
 var _ = AfterSuite(func() {
 	By("Deleting Namespace")
-	err := root.DeleteNamespace()
+	err := framework.RootFramework.DeleteNamespace()
 	Expect(err).NotTo(HaveOccurred())
 })

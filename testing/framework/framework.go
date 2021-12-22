@@ -32,10 +32,6 @@ var (
 	RootFramework *Framework
 )
 
-func NewInvocation() *Invocation {
-	return RootFramework.Invoke()
-}
-
 func (f *Framework) Invoke() *Invocation {
 	return &Invocation{
 		Framework:     f,
@@ -44,12 +40,16 @@ func (f *Framework) Invoke() *Invocation {
 	}
 }
 
-func (i *Invocation) Checker() bool {
-	return true
-}
-
 type Invocation struct {
 	*Framework
 	app           string
 	testResources []interface{}
+}
+
+func NewInvocation() *Invocation {
+	return RootFramework.Invoke()
+}
+
+func (i *Invocation) Checker() bool {
+	return true
 }
