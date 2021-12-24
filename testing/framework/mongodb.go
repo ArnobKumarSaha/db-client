@@ -9,7 +9,7 @@ import (
 	kdm "kubedb.dev/apimachinery/apis/kubedb/v1alpha2"
 )
 
-func (i *Invocation) GetMongoShardSpec() *kdm.MongoDB {
+func (i *Invocation) GetMongoDBSpec(opts ...*DBOptions) *kdm.MongoDB {
 	podTmpl := ofst.PodTemplateSpec{
 		Spec: ofst.PodSpec{
 			Resources: core.ResourceRequirements{
@@ -27,16 +27,23 @@ func (i *Invocation) GetMongoShardSpec() *kdm.MongoDB {
 			},
 		},
 		StorageClassName: func(s string) *string { return &s }("standard"),
+		AccessModes: []core.PersistentVolumeAccessMode{
+			core.ReadWriteOnce,
+		},
 	}
 
-	return &kdm.MongoDB{
+	retDB := &kdm.MongoDB{
 		ObjectMeta: meta.ObjectMeta{
 			Name:      "mng-shrd",
 			Namespace: i.Namespace(),
 		},
 		Spec: kdm.MongoDBSpec{
 			Version: "4.4.6",
-			ShardTopology: &kdm.MongoDBShardingTopology{
+		},
+	}
+	for _, opt := range opts {
+		if opt.DBType == Sharded {
+			retDB.Spec.ShardTopology = &kdm.MongoDBShardingTopology{
 				Shard: kdm.MongoDBShardNode{
 					MongoDBNode: kdm.MongoDBNode{
 						Replicas:    2,
@@ -58,16 +65,27 @@ func (i *Invocation) GetMongoShardSpec() *kdm.MongoDB {
 						PodTemplate: podTmpl,
 					},
 				},
-			},
-		},
+			}
+		} else if opt.DBType == ReplicaSet {
+			retDB.Spec.ReplicaSet = &kdm.MongoDBReplicaSet{
+				Name: "rs",
+			}
+			retDB.Spec.PodTemplate = &podTmpl
+			retDB.Spec.Replicas = func(i int32) *int32 { return &i }(3)
+			retDB.Spec.StorageType = kdm.StorageTypeDurable
+			retDB.Spec.Storage = storage
+		} else { // standAlone
+
+		}
 	}
+	return retDB
 }
 
-func (i *Invocation) CreateMongoDB(m *kdm.MongoDB) error {
-	err := i.myClient.Create(context.TODO(), m)
+func (i *TestOptions) CreateMongoDB() error {
+	err := i.myClient.Create(context.TODO(), i.Mongodb)
 	return err
 }
-func (i *Invocation) DeleteMongoDB(m *kdm.MongoDB) error {
-	err := i.myClient.Delete(context.TODO(), m)
+func (i *TestOptions) DeleteMongoDB() error {
+	err := i.myClient.Delete(context.TODO(), i.Mongodb)
 	return err
 }

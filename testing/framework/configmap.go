@@ -19,11 +19,16 @@ func (i *Invocation) GetConfigMapSpec() *corev1.ConfigMap {
 	}
 }
 
-func (i *Invocation) CreateConfigMap(c *corev1.ConfigMap) error {
-	err := i.myClient.Create(context.TODO(), c)
+var (
+	cm *corev1.ConfigMap
+)
+
+func (i *Invocation) CreateConfigMap() error {
+	cm = i.GetConfigMapSpec()
+	err := i.myClient.Create(context.TODO(), cm)
 	return err
 }
-func (i *Invocation) DeleteConfigMap(c *corev1.ConfigMap) error {
-	err := i.myClient.Delete(context.TODO(), c)
+func (i *Invocation) DeleteConfigMap() error {
+	err := i.myClient.Delete(context.TODO(), cm)
 	return err
 }

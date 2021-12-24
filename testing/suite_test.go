@@ -22,14 +22,14 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/util/homedir"
+	appcat "kmodules.xyz/custom-resources/client/clientset/versioned/scheme"
 	schemav1alpha1 "kubedb.dev/schema-manager/apis/schema/v1alpha1"
 	"kubedb.dev/schema-manager/controllers/schema/framework"
 	kubevaultscheme "kubevault.dev/apimachinery/client/clientset/versioned/scheme"
-	"path/filepath"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	stashScheme "stash.appscode.dev/apimachinery/client/clientset/versioned/scheme"
 	"testing"
 	"time"
 
@@ -46,9 +46,7 @@ import (
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
 var (
-	//Root      *framework.Framework
-	scheme         = runtime.NewScheme()
-	kubeconfigPath = filepath.Join(homedir.HomeDir(), ".kube", "config")
+	scheme = runtime.NewScheme()
 )
 
 const (
@@ -69,6 +67,8 @@ func init() {
 	utilruntime.Must(schemav1alpha1.AddToScheme(scheme))
 	utilruntime.Must(kubedbscheme.AddToScheme(scheme))
 	utilruntime.Must(kubevaultscheme.AddToScheme(scheme))
+	utilruntime.Must(stashScheme.AddToScheme(scheme))
+	utilruntime.Must(appcat.AddToScheme(scheme))
 }
 
 func getManager() manager.Manager {
@@ -87,7 +87,7 @@ func getManager() manager.Manager {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
-	time := time.Minute * 3
+	tm := time.Minute * 3
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		MetricsBindAddress:     metricsAddr,
@@ -95,14 +95,14 @@ func getManager() manager.Manager {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "82ac5e1d.kubedb.com",
-		SyncPeriod:             &time,
+		SyncPeriod:             &tm,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	return mgr
 }
 
 var _ = BeforeSuite(func() {
-	config, err := clientcmd.BuildConfigFromContext(kubeconfigPath, "")
+	config, err := clientcmd.BuildConfigFromContext("", "")
 	Expect(err).NotTo(HaveOccurred())
 	mgr := getManager()
 	go func() {

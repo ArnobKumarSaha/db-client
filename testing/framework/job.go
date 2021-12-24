@@ -8,7 +8,6 @@ import (
 )
 
 func (i *Invocation) GetTheRunnerJob() *batchv1.Job {
-
 	return &batchv1.Job{
 		ObjectMeta: meta.ObjectMeta{
 			Name:      "kubernetes-go-test",
@@ -24,18 +23,19 @@ func (i *Invocation) GetTheRunnerJob() *batchv1.Job {
 							ImagePullPolicy: corev1.PullAlways,
 						},
 					},
-					RestartPolicy: corev1.RestartPolicyNever,
+					RestartPolicy:      corev1.RestartPolicyNever,
+					ServiceAccountName: "",
 				},
 			},
 		},
 	}
 }
 
-func (i *Invocation) CreateRunnerJob(j *batchv1.Job) error {
-	err := i.myClient.Create(context.TODO(), j)
+func (i *TestOptions) CreateRunnerJob() error {
+	err := i.myClient.Create(context.TODO(), i.InitJob)
 	return err
 }
-func (i *Invocation) DeleteRunnerJob(j *batchv1.Job) error {
-	err := i.myClient.Delete(context.TODO(), j)
+func (i *TestOptions) DeleteRunnerJob() error {
+	err := i.myClient.Delete(context.TODO(), i.InitJob)
 	return err
 }

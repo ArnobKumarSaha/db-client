@@ -67,12 +67,12 @@ func (i *Invocation) GetVaultServerSpec() *kvm.VaultServer {
 	}
 }
 
-func (i *Invocation) CreateVaultServer(v *kvm.VaultServer) error {
-	err := i.myClient.Create(context.TODO(), v)
+func (i *TestOptions) CreateVaultServer() error {
+	err := i.myClient.Create(context.TODO(), i.Vault)
 	return err
 }
 
-func (i *Invocation) DeleteVaultServer(v *kvm.VaultServer) error {
-	err := i.myClient.Delete(context.TODO(), v)
+func (i *TestOptions) DeleteVaultServer() error {
+	err := i.myClient.Delete(context.TODO(), i.Vault)
 	return err
 }
