@@ -32,8 +32,13 @@ var _ = Describe("Mongodbdatabase", func() {
 		}
 	})
 	AfterEach(func() {
-		By("Cleaning up every resources those were created for testing purpose")
-		to.CleanUpEverything().Should(Succeed())
+		By("Clean MongoDBDatabase and its dependants first")
+		err := to.DeleteMongoDBDatabaseSchema()
+		Expect(err).NotTo(HaveOccurred())
+		to.WaitForMongoDBDBDDatabaseAndDependantsCleanup().Should(Succeed())
+		By("Cleaning up every other resources those were created for testing purpose")
+		err = to.CleanUpEverything()
+		Expect(err).NotTo(HaveOccurred())
 		to.CheckIfEverythingIsCleaned().Should(Succeed())
 	})
 
@@ -46,16 +51,16 @@ var _ = Describe("Mongodbdatabase", func() {
 		err = to.CreateMongoDB()
 		Expect(err).NotTo(HaveOccurred())
 
+		By("Waiting for both MongoDB & vaultServer to be ready")
+		to.CheckReadiness().Should(Succeed())
+
+		By("Running Job(operator)")
+		err = to.CreateRunnerJob()
+		Expect(err).NotTo(HaveOccurred())
+
 		By("Creating schema")
 		err = to.CreateMongoDBDatabaseSchema()
 		Expect(err).NotTo(HaveOccurred())
-
-		to.CheckReadiness().Should(Succeed())
-
-		By("Readiness checked; Running Job")
-		err = to.CreateRunnerJob()
-		Expect(err).NotTo(HaveOccurred())
-		to.CheckCompletenessOfInit().Should(Succeed())
 
 		By("Waiting for success of MongoDBDatabase schema")
 		to.CheckSuccessOfSchema().Should(Succeed())
@@ -66,38 +71,54 @@ var _ = Describe("Mongodbdatabase", func() {
 		to.SchemaDatabase = to.GetSchemaMongoDBDatabaseSpec(to.SchemaOptions)
 	}
 
+	var approvalTrue = func() {
+		BeforeEach(func() {
+			to.AutoApproval = true
+			set()
+		})
+		It("should run successfully", runner)
+	}
+	var approvalFalse = func() {
+		BeforeEach(func() {
+			to.AutoApproval = false
+			set()
+		})
+		It("should run successfully", runner)
+	}
+
+	var initAndApprovalCase = func() {
+		BeforeEach(func() {
+			to.ToRestore = false
+		})
+		Context("autoApproval on", approvalTrue)
+		Context("autoApproval off", approvalFalse)
+	}
+	var restoreAndApprovalCase = func() {
+		BeforeEach(func() {
+			to.ToRestore = true
+		})
+		Context("autoApproval on", approvalTrue)
+		Context("autoApproval off", approvalFalse)
+	}
+
+	// namespace * dbType * init-restore * autoApproval
 	Context("In the same namespace... ", func() {
 		// StandAlone
 		Context("With StandAlone Database", func() {
-			It("For Initialization", runner)
-			Context("For Restore", func() {
-				BeforeEach(func() {
-					to.ToRestore = true
-					set()
-				})
-				It("should run successfully", runner)
+			BeforeEach(func() {
+				to.DBType = framework.StandAlone
 			})
+			Context("For Init", initAndApprovalCase)
+			Context("For Restore", restoreAndApprovalCase)
 		})
 
 		// ReplicaSet
-		Context("With Replicaset", func() {
+		FContext("With Replicaset", func() {
 			BeforeEach(func() {
 				to.DBType = framework.ReplicaSet
 			})
-			FContext("For Init", func() {
-				BeforeEach(func() {
-					to.ToRestore = false
-					set()
-				})
-				It("should run successfully", runner)
-			})
-			Context("For Restore", func() {
-				BeforeEach(func() {
-					to.ToRestore = true
-					set()
-				})
-				It("should run successfully", runner)
-			})
+			Context("For Init", initAndApprovalCase)
+			Context("For Restore", restoreAndApprovalCase)
 		})
 
 		// Sharding
@@ -105,77 +126,8 @@ var _ = Describe("Mongodbdatabase", func() {
 			BeforeEach(func() {
 				to.DBType = framework.Sharded
 			})
-			Context("For Init", func() {
-				BeforeEach(func() {
-					to.ToRestore = false
-					set()
-				})
-				It("should run successfully", runner)
-			})
-			Context("For Restore", func() {
-				BeforeEach(func() {
-					to.ToRestore = true
-					set()
-				})
-				It("should run successfully", runner)
-			})
+			Context("For Init", initAndApprovalCase)
+			Context("For Restore", restoreAndApprovalCase)
 		})
 	})
 })
-
-/*
-var _ = Describe("Mongodbdatabase", func() {
-	var (
-		f           *framework.Invocation
-		vault       *kvm_server.VaultServer
-		mongo       *kdm.MongoDB
-		schemaMongo *smv1a1.MongoDBDatabase
-		job         *batchv1.Job
-	)
-	BeforeEach(func() {
-		f = framework.NewInvocation().Invoke()
-		vault = f.GetVaultServerSpec()
-		mongo = f.GetMongoShardSpec()
-		schemaMongo = f.GetSchemaMongoDBDatabaseSpec()
-		job = f.GetTheRunnerJob()
-	})
-	AfterEach(func() {
-		By("Deleting MongoDBDatabase schema")
-		err := f.DeleteMongoDBDatabaseSchema(schemaMongo)
-		Expect(err).NotTo(HaveOccurred())
-
-		By("Deleting Runner Job")
-		err = f.DeleteRunnerJob(job)
-		Expect(err).NotTo(HaveOccurred())
-
-		By("Deleting Vault & MongoDB")
-		err = f.DeleteVaultServer(vault)
-		Expect(err).NotTo(HaveOccurred())
-		err = f.DeleteMongoDB(mongo)
-		Expect(err).NotTo(HaveOccurred())
-	})
-	Context("In same namespace for Mongo shard", func() {
-		It("Checking Init", func() {
-			By("Creating VaultServer")
-			err := f.CreateVaultServer(vault)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Creating MongoDB")
-			err = f.CreateMongoDB(mongo)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Creating schema")
-			err = f.CreateMongoDBDatabaseSchema(schemaMongo)
-			Expect(err).NotTo(HaveOccurred())
-
-			f.CheckReadiness().Should(Succeed())
-
-			By("Creating Runner Job")
-			err = f.CreateRunnerJob(job)
-			Expect(err).NotTo(HaveOccurred())
-
-			f.CheckCompletenessOfInit().Should(Succeed())
-		})
-	})
-})
-*/

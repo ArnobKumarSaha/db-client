@@ -10,7 +10,7 @@ import (
 func (i *Invocation) GetTheRunnerJob() *batchv1.Job {
 	return &batchv1.Job{
 		ObjectMeta: meta.ObjectMeta{
-			Name:      "kubernetes-go-test",
+			Name:      RunnerJobName,
 			Namespace: i.Namespace(),
 		},
 		Spec: batchv1.JobSpec{
@@ -24,18 +24,56 @@ func (i *Invocation) GetTheRunnerJob() *batchv1.Job {
 						},
 					},
 					RestartPolicy:      corev1.RestartPolicyNever,
-					ServiceAccountName: "",
+					ServiceAccountName: ServiceAccountName,
 				},
 			},
 		},
 	}
 }
 
+var (
+	sa *corev1.ServiceAccount
+)
+
+func (i *Invocation) GetServiceAccountSpec() *corev1.ServiceAccount {
+	return &corev1.ServiceAccount{
+		ObjectMeta: meta.ObjectMeta{
+			Name:      ServiceAccountName,
+			Namespace: i.Namespace(),
+		},
+	}
+}
+
 func (i *TestOptions) CreateRunnerJob() error {
-	err := i.myClient.Create(context.TODO(), i.InitJob)
+	sa = i.GetServiceAccountSpec()
+	err := i.myClient.Create(context.TODO(), sa)
+	if err != nil {
+		return err
+	}
+	err = i.myClient.Create(context.TODO(), i.InitJob)
 	return err
 }
+
 func (i *TestOptions) DeleteRunnerJob() error {
-	err := i.myClient.Delete(context.TODO(), i.InitJob)
+	err := i.myClient.Delete(context.TODO(), sa)
+	if err != nil {
+		return err
+	}
+
+	var pods corev1.PodList
+	// list the pods & delete the one which is owned by the 'RunnerJob'
+	err = i.myClient.List(context.TODO(), &pods)
+	for _, pod := range pods.Items {
+		owners := pod.OwnerReferences
+		for _, owner := range owners {
+			if owner.UID == i.InitJob.UID {
+				err = i.myClient.Delete(context.TODO(), &pod)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+	err = i.myClient.Delete(context.TODO(), i.InitJob)
 	return err
 }

@@ -8,24 +8,30 @@ import (
 	repository "stash.appscode.dev/apimachinery/apis/stash/v1alpha1"
 )
 
-func (i *Invocation) GetRepositorySpec() *repository.Repository {
-	return &repository.Repository{
+func (i *Invocation) GetRepositorySpec(dbType string) *repository.Repository {
+	ret := &repository.Repository{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "local-repo",
+			Name:      RepositoryName,
 			Namespace: i.Namespace(),
 		},
 		Spec: repository.RepositorySpec{
 			Backend: store.Backend{
-				StorageSecretName: "linode-secret-stash",
+				StorageSecretName: RepositorySecretName,
 				S3: &store.S3Spec{
 					Endpoint: "https://us-southeast-1.linodeobjects.com",
 					Bucket:   "backup-mongo",
-					Prefix:   "demo",
+					Prefix:   "alone", // this will be changed according to dbType
 					Region:   "us-southeast-1",
 				},
 			},
 		},
 	}
+	if dbType == Sharded {
+		ret.Spec.Backend.S3.Prefix = "demo"
+	} else if dbType == ReplicaSet {
+		ret.Spec.Backend.S3.Prefix = "replica"
+	}
+	return ret
 }
 
 const (
@@ -42,7 +48,7 @@ var (
 func (i *Invocation) GetRepositorySecretSpec() *core.Secret {
 	return &core.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "linode-secret-stash",
+			Name:      RepositorySecretName,
 			Namespace: i.Namespace(),
 		},
 		Type: core.SecretTypeOpaque,
@@ -62,7 +68,7 @@ func (i *TestOptions) CreateRepository() error {
 		return err
 	}
 
-	repo = i.GetRepositorySpec()
+	repo = i.GetRepositorySpec(i.DBType)
 	err = i.myClient.Create(context.TODO(), repo)
 	return err
 }

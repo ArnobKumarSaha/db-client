@@ -16,24 +16,24 @@ import (
 func (i *Invocation) GetSchemaMongoDBDatabaseSpec(opts ...*SchemaOptions) *smv1a1.MongoDBDatabase {
 	retObj := &smv1a1.MongoDBDatabase{
 		ObjectMeta: meta.ObjectMeta{
-			Name:      "sample",
+			Name:      MongoDBDatabaseSchemaName,
 			Namespace: i.Namespace(),
 		},
 		Spec: smv1a1.MongoDBDatabaseSpec{
 			DatabaseRef: apiv1.ObjectReference{
-				Name:      "mng-shrd",
+				Name:      MongoDBName,
 				Namespace: i.Namespace(),
 			},
 			VaultRef: apiv1.ObjectReference{
-				Name:      "vault",
+				Name:      VaultName,
 				Namespace: i.Namespace(),
 			},
 			DatabaseSchema: smv1a1.DatabaseSchema{
-				Name: "mydb",
+				Name: SchemaName,
 			},
 			Subjects: []smv1a1.Subject{
 				{
-					Name:      "sa_name",
+					Name:      SubjectName,
 					Namespace: i.Namespace(),
 					SubjectKind: meta.TypeMeta{
 						Kind:       "ServiceAccount",
@@ -50,7 +50,7 @@ func (i *Invocation) GetSchemaMongoDBDatabaseSpec(opts ...*SchemaOptions) *smv1a
 		if opt.ToRestore {
 			retObj.Spec.Restore = &smv1a1.RestoreRef{
 				Repository: apiv1.ObjectReference{
-					Name:      "local-repo",
+					Name:      RepositoryName,
 					Namespace: i.Namespace(),
 				},
 				Snapshot: "latest",
@@ -63,7 +63,7 @@ func (i *Invocation) GetSchemaMongoDBDatabaseSpec(opts ...*SchemaOptions) *smv1a
 					VolumeSource: corev1.VolumeSource{
 						ConfigMap: &corev1.ConfigMapVolumeSource{
 							LocalObjectReference: corev1.LocalObjectReference{
-								Name: "test-cm",
+								Name: ConfigMapName,
 							},
 						},
 					},
@@ -124,7 +124,7 @@ func (i *TestOptions) CheckSuccessOfSchema() GomegaAsyncAssertion {
 			var obj smv1a1.MongoDBDatabase
 			err := i.myClient.Get(context.TODO(), types.NamespacedName{
 				Namespace: i.Namespace(),
-				Name:      "sample",
+				Name:      MongoDBDatabaseSchemaName,
 			}, &obj)
 			if err != nil {
 				return err
@@ -134,7 +134,7 @@ func (i *TestOptions) CheckSuccessOfSchema() GomegaAsyncAssertion {
 			}
 			return nil
 		},
-		time.Minute*1,
+		time.Minute*6,
 		time.Second*10,
 	)
 }

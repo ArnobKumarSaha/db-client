@@ -6,6 +6,14 @@ rules:
 - apiGroups:
   - kubedb.com
   - catalog.kubedb.com
+  - schema.kubedb.com
+  - stash.appscode.com
+  - repositories.stash.appscode.com
+  - kubevault.com
+  - engine.kubevault.com
+  - batch
+  - appcatalog.appscode.com
+  - ""
   resources:
   - '*'
   verbs:

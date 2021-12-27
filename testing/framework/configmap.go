@@ -9,7 +9,7 @@ import (
 func (i *Invocation) GetConfigMapSpec() *corev1.ConfigMap {
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-cm",
+			Name:      ConfigMapName,
 			Namespace: i.Namespace(),
 		},
 		Data: map[string]string{

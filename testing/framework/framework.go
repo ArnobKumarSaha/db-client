@@ -41,7 +41,7 @@ var (
 func (f *Framework) Invoke() *Invocation {
 	return &Invocation{
 		Framework:     f,
-		app:           "", //rand.WithUniqSuffix(strings.ToLower(fmt.Sprintf("%s-e2e", DBType))),
+		app:           "",
 		testResources: make([]interface{}, 0),
 	}
 }

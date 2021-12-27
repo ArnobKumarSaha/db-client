@@ -5,6 +5,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	mona "kmodules.xyz/monitoring-agent-api/api/v1"
 	kvm "kubevault.dev/apimachinery/apis/kubevault/v1alpha1"
 )
@@ -12,7 +13,7 @@ import (
 func (i *Invocation) GetVaultServerSpec() *kvm.VaultServer {
 	return &kvm.VaultServer{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "vault",
+			Name:      VaultName,
 			Namespace: i.Namespace(),
 		},
 		Spec: kvm.VaultServerSpec{
@@ -74,5 +75,12 @@ func (i *TestOptions) CreateVaultServer() error {
 
 func (i *TestOptions) DeleteVaultServer() error {
 	err := i.myClient.Delete(context.TODO(), i.Vault)
+	// Get & delete the vault secret manually
+	var v_sec corev1.Secret
+	err = i.myClient.Get(context.TODO(), types.NamespacedName{
+		Namespace: i.Namespace(),
+		Name:      VaultName + "-keys",
+	}, &v_sec)
+	err = i.myClient.Delete(context.TODO(), &v_sec)
 	return err
 }

@@ -34,7 +34,7 @@ func (i *Invocation) GetMongoDBSpec(opts ...*DBOptions) *kdm.MongoDB {
 
 	retDB := &kdm.MongoDB{
 		ObjectMeta: meta.ObjectMeta{
-			Name:      "mng-shrd",
+			Name:      MongoDBName,
 			Namespace: i.Namespace(),
 		},
 		Spec: kdm.MongoDBSpec{
@@ -46,15 +46,15 @@ func (i *Invocation) GetMongoDBSpec(opts ...*DBOptions) *kdm.MongoDB {
 			retDB.Spec.ShardTopology = &kdm.MongoDBShardingTopology{
 				Shard: kdm.MongoDBShardNode{
 					MongoDBNode: kdm.MongoDBNode{
-						Replicas:    2,
+						Replicas:    3,
 						PodTemplate: podTmpl,
 					},
-					Shards:  1,
+					Shards:  2,
 					Storage: storage,
 				},
 				ConfigServer: kdm.MongoDBConfigNode{
 					MongoDBNode: kdm.MongoDBNode{
-						Replicas:    1,
+						Replicas:    3,
 						PodTemplate: podTmpl,
 					},
 					Storage: storage,
@@ -75,7 +75,8 @@ func (i *Invocation) GetMongoDBSpec(opts ...*DBOptions) *kdm.MongoDB {
 			retDB.Spec.StorageType = kdm.StorageTypeDurable
 			retDB.Spec.Storage = storage
 		} else { // standAlone
-
+			retDB.Spec.StorageType = kdm.StorageTypeDurable
+			retDB.Spec.Storage = storage
 		}
 	}
 	return retDB
