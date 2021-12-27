@@ -1,142 +1,108 @@
 package schema
 
 import (
-	"context"
-	"fmt"
-	batch "k8s.io/api/batch/v1"
-	core "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
-	kutil "kmodules.xyz/client-go"
-	kmapi "kmodules.xyz/client-go/api/v1"
-	schemav1alpha1 "kubedb.dev/schema-manager/apis/schema/v1alpha1"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	apiv1util "kmodules.xyz/client-go/api/v1"
+	smv1a1 "kubedb.dev/schema-manager/apis/schema/v1alpha1"
 	kvm_apis "kubevault.dev/apimachinery/apis"
 	kvm_engine "kubevault.dev/apimachinery/apis/engine/v1alpha1"
 	kvm_server "kubevault.dev/apimachinery/apis/kubevault/v1alpha1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	stash "stash.appscode.dev/apimachinery/apis/stash/v1beta1"
 )
 
-func GetPhaseFromCondition(conditions []kmapi.Condition) schemav1alpha1.SchemaDatabasePhase {
+func GetPhaseFromCondition(conditions []apiv1util.Condition, toRestore bool) smv1a1.SchemaDatabasePhase {
 	// Set the SchemeDatabasePhase to 'running', if any of them is 'Not ready'
-	if !kmapi.IsConditionTrue(conditions, string(schemav1alpha1.SchemaDatabaseConditionDBReady)) {
-		return schemav1alpha1.SchemaDatabasePhaseRunning
+	if !apiv1util.IsConditionTrue(conditions, string(smv1a1.SchemaDatabaseConditionSecretEngineReady)) ||
+		!apiv1util.IsConditionTrue(conditions, string(smv1a1.SchemaDatabaseConditionMongoDBRoleReady)) {
+		return smv1a1.SchemaDatabasePhaseInitializing
 	}
 
-	if !kmapi.IsConditionTrue(conditions, string(schemav1alpha1.SchemaDatabaseConditionVaultReady)) {
-		return schemav1alpha1.SchemaDatabasePhaseRunning
+	if !apiv1util.IsConditionTrue(conditions, string(smv1a1.SchemaDatabaseConditionSecretAccessRequestReady)) {
+		return smv1a1.SchemaDatabasePhaseRunning
 	}
 
-	if !kmapi.IsConditionTrue(conditions, string(schemav1alpha1.SchemaDatabaseConditionSecretEngineReady)) {
-		return schemav1alpha1.SchemaDatabasePhaseRunning
+	if toRestore {
+		if !apiv1util.IsConditionTrue(conditions, string(smv1a1.SchemaDatabaseConditionRepositoryFound)) {
+			return smv1a1.SchemaDatabasePhaseRunning
+		}
+		if !apiv1util.IsConditionTrue(conditions, string(smv1a1.SchemaDatabaseConditionAppbindingFound)) {
+			return smv1a1.SchemaDatabasePhaseRunning
+		}
+		if !apiv1util.IsConditionTrue(conditions, string(smv1a1.SchemaDatabaseConditionRestoreSessionSucceed)) {
+			return smv1a1.SchemaDatabasePhaseRunning
+		}
+	} else {
+		if apiv1util.HasCondition(conditions, string(smv1a1.SchemaDatabaseConditionJobCompleted)) && !apiv1util.IsConditionTrue(conditions, string(smv1a1.SchemaDatabaseConditionJobCompleted)) {
+			return smv1a1.SchemaDatabasePhaseRunning
+		}
 	}
-
-	if !kmapi.IsConditionTrue(conditions, string(schemav1alpha1.SchemaDatabaseConditionPostgresRoleReady)) {
-		return schemav1alpha1.SchemaDatabasePhaseRunning
-	}
-
-	if !kmapi.IsConditionTrue(conditions, string(schemav1alpha1.SchemaDatabaseConditionSecretAccessRequestReady)) {
-		return schemav1alpha1.SchemaDatabasePhaseRunning
-	}
-
-	if kmapi.HasCondition(conditions, string(schemav1alpha1.SchemaDatabaseConditionJobCompleted)) && !kmapi.IsConditionTrue(conditions, string(schemav1alpha1.SchemaDatabaseConditionJobCompleted)) {
-		return schemav1alpha1.SchemaDatabasePhaseRunning
-	}
-	return schemav1alpha1.SchemaDatabasePhaseSucceeded
+	return smv1a1.SchemaDatabasePhaseSucceeded
 }
 
 func CheckVaultConditions(vaultServer *kvm_server.VaultServer) bool {
 	cond := true
-	cond = cond && kmapi.IsConditionTrue(vaultServer.Status.Conditions, kvm_apis.AllReplicasAreReady)
-	cond = cond && kmapi.IsConditionTrue(vaultServer.Status.Conditions, kvm_apis.VaultServerAcceptingConnection)
-	cond = cond && kmapi.IsConditionTrue(vaultServer.Status.Conditions, kvm_apis.VaultServerInitialized)
-	cond = cond && kmapi.IsConditionTrue(vaultServer.Status.Conditions, kvm_apis.VaultServerUnsealed)
+	cond = cond && apiv1util.IsConditionTrue(vaultServer.Status.Conditions, kvm_apis.AllReplicasAreReady)
+	cond = cond && apiv1util.IsConditionTrue(vaultServer.Status.Conditions, kvm_apis.VaultServerAcceptingConnection)
+	cond = cond && apiv1util.IsConditionTrue(vaultServer.Status.Conditions, kvm_apis.VaultServerInitialized)
+	cond = cond && apiv1util.IsConditionTrue(vaultServer.Status.Conditions, kvm_apis.VaultServerUnsealed)
 	return cond
 }
 
 func CheckSecretEngineConditions(secretEng *kvm_engine.SecretEngine) bool {
-	return kmapi.IsConditionTrue(secretEng.Status.Conditions, kmapi.ConditionAvailable)
+	return apiv1util.IsConditionTrue(secretEng.Status.Conditions, apiv1util.ConditionAvailable)
 }
 
 func CheckMongoDBRoleConditions(dbRole *kvm_engine.MongoDBRole) bool {
 	cond := true
-	cond = cond && kmapi.IsConditionTrue(dbRole.Status.Conditions, kmapi.ConditionAvailable)
+	cond = cond && apiv1util.IsConditionTrue(dbRole.Status.Conditions, apiv1util.ConditionAvailable)
 	return cond
 }
 
 func CheckPostgresRoleConditions(dbRole *kvm_engine.PostgresRole) bool {
 	cond := true
-	cond = cond && kmapi.IsConditionTrue(dbRole.Status.Conditions, kmapi.ConditionAvailable)
+	cond = cond && apiv1util.IsConditionTrue(dbRole.Status.Conditions, apiv1util.ConditionAvailable)
 	return cond
 }
 
 func CheckMysqlRoleConditions(dbRole *kvm_engine.MySQLRole) bool {
 	cond := true
-	cond = cond && kmapi.IsConditionTrue(dbRole.Status.Conditions, kmapi.ConditionAvailable)
+	cond = cond && apiv1util.IsConditionTrue(dbRole.Status.Conditions, apiv1util.ConditionAvailable)
 	return cond
 }
 
 func CheckSecretAccessRequestConditions(acrObj *kvm_engine.SecretAccessRequest) bool {
 	cond := true
-	cond = cond && kmapi.IsConditionTrue(acrObj.Status.Conditions, kmapi.ConditionAvailable)
-	cond = cond && kmapi.IsConditionTrue(acrObj.Status.Conditions, kmapi.ConditionRequestApproved)
+	cond = cond && apiv1util.IsConditionTrue(acrObj.Status.Conditions, apiv1util.ConditionAvailable)
+	cond = cond && apiv1util.IsConditionTrue(acrObj.Status.Conditions, apiv1util.ConditionRequestApproved)
 	return cond
 }
 
-func CheckJobConditions(job *batch.Job) bool {
+func CheckRestoreSessionPhase(res *stash.RestoreSession) bool {
+	return res.Status.Phase == stash.RestoreSucceeded
+}
+
+func CheckJobConditions(job *batchv1.Job) bool {
 	cond := true
-	cond = cond && IsJobConditionTrue(job.Status.Conditions, batch.JobComplete)
+	cond = cond && IsJobConditionTrue(job.Status.Conditions, batchv1.JobComplete)
 	return cond
 }
 
-func IsJobConditionTrue(conditions []batch.JobCondition, condType batch.JobConditionType) bool {
+func IsJobConditionTrue(conditions []batchv1.JobCondition, condType batchv1.JobConditionType) bool {
 	for i := range conditions {
-		if conditions[i].Type == condType && conditions[i].Status == core.ConditionTrue {
+		if conditions[i].Type == condType && conditions[i].Status == corev1.ConditionTrue {
 			return true
 		}
 	}
 	return false
 }
 
-type TransformFunc func(obj client.Object, createOp bool) client.Object
-
-func PatchStatus(c client.Client, obj client.Object, transform TransformFunc, opts ...client.PatchOption) (client.Object, kutil.VerbType, error) {
-	key := types.NamespacedName{
-		Namespace: obj.GetNamespace(),
-		Name:      obj.GetName(),
-	}
-	err := c.Get(context.TODO(), key, obj)
-	if errors.IsNotFound(err) {
-		fmt.Println("+++++++++++++++++++++ IsNotFoundError from PatchStatus")
-	}
-	if err != nil {
-		fmt.Println("+++++++++++++++++++++ Error from PatchStatus")
-		return nil, kutil.VerbUnchanged, err
-	}
-
-	//patch := client.MergeFrom(obj)
-
-	obj = transform(obj.DeepCopyObject().(client.Object), false)
-	//err = c.Status().Patch(context.TODO(), obj, patch, opts...)
-	err = c.Status().Update(context.TODO(), obj)
-	if err != nil {
-		return nil, kutil.VerbUnchanged, err
-	}
-	return obj, kutil.VerbPatched, nil
-}
-
-func SetCondition(database *schemav1alpha1.MongoDBDatabase, typ schemav1alpha1.SchemaDatabaseCondition, sts core.ConditionStatus, reason schemav1alpha1.SchemaDatabaseReason, msg string) {
-	gen := int64(1)
-	for i := range database.Status.Conditions {
-		c := database.Status.Conditions[i]
-		if c.Type == string(typ) && c.Status != sts {
-			gen += 1
+// ContainsString function is to check and remove string from a slice of strings.
+func ContainsString(slice []string, s string) bool {
+	for _, item := range slice {
+		if item == s {
+			return true
 		}
 	}
-	database.Status.Conditions = kmapi.SetCondition(database.Status.Conditions, kmapi.Condition{
-		Type:               string(typ),
-		Status:             sts,
-		Reason:             string(reason),
-		ObservedGeneration: gen,
-		Message:            msg,
-	})
+	return false
 }

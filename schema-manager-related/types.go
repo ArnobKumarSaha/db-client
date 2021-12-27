@@ -1,5 +1,9 @@
 package v1alpha1
 
+import (
+	kvm_engine "kubevault.dev/apimachinery/apis/engine/v1alpha1"
+)
+
 type DeletionPolicy string
 
 const (
@@ -14,9 +18,10 @@ type SchemaDatabasePhase string
 const (
 	// Phase 'Running' if it is currently working with the objects, on which it is dependant on.
 	// 'succeeded' if all of them is successful, 'failed' if any of them is failed
-	SchemaDatabasePhaseRunning   SchemaDatabasePhase = "Running"
-	SchemaDatabasePhaseSucceeded SchemaDatabasePhase = "Succeeded"
-	SchemaDatabasePhaseFailed    SchemaDatabasePhase = "Failed"
+	SchemaDatabasePhaseRunning      SchemaDatabasePhase = "Running"
+	SchemaDatabasePhaseSucceeded    SchemaDatabasePhase = "Succeeded"
+	SchemaDatabasePhaseFailed       SchemaDatabasePhase = "Failed"
+	SchemaDatabasePhaseInitializing SchemaDatabasePhase = "Initializing"
 )
 
 type SchemaDatabaseCondition string
@@ -32,6 +37,10 @@ const (
 	SchemaDatabaseConditionPostgresRoleReady SchemaDatabaseCondition = "PostgresRoleReady"
 	SchemaDatabaseConditionMysqlRoleReady    SchemaDatabaseCondition = "MysqlRoleReady"
 	SchemaDatabaseConditionMariaDBRoleReady  SchemaDatabaseCondition = "MariaDBRoleReady"
+	// Stash related
+	SchemaDatabaseConditionRepositoryFound       SchemaDatabaseCondition = "RepositoryFound"
+	SchemaDatabaseConditionAppbindingFound       SchemaDatabaseCondition = "AppbindingFound"
+	SchemaDatabaseConditionRestoreSessionSucceed SchemaDatabaseCondition = "RestoreSessionSucceeded"
 )
 
 type SchemaDatabaseReason string
@@ -47,4 +56,13 @@ const (
 	SchemaDatabaseReasonPostgresRoleReady SchemaDatabaseReason = "CheckPostgresRoleIsReady"
 	SchemaDatabaseReasonMysqlRoleReady    SchemaDatabaseReason = "CheckMysqlRoleIsReady"
 	SchemaDatabaseReasonMariaDbRoleReady  SchemaDatabaseReason = "CheckMariaDBRoleIsReady"
+	// Stash related
+	SchemaDatabaseReasonRepositoryFound       SchemaDatabaseReason = "RepositoryIsFound"
+	SchemaDatabaseReasonAppbindingFound       SchemaDatabaseReason = "AppbindingIsFound"
+	SchemaDatabaseReasonRestoreSessionSucceed SchemaDatabaseReason = "RestoreSessionIsSucceeded"
+)
+
+const (
+	SecretEnginePhaseSuccess    kvm_engine.SecretEnginePhase = "Success"
+	SecretEnginePhaseProcessing kvm_engine.SecretEnginePhase = "Processing"
 )

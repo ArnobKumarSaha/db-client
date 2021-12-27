@@ -79,7 +79,7 @@ type InitSpec struct {
 	// Initialized indicates that this database has been initialized.
 	// This will be set by the operator when status.conditions["Provisioned"] is set to ensure
 	// that database is not mistakenly reset when recovered using disaster recovery tools.
-	Initialized bool `json:"initialized,omitempty" protobuf:"varint,1,opt,name=initialized"`
+	Initialized bool `json:"initialized" protobuf:"varint,1,opt,name=initialized"`
 
 	Script *ScriptSourceSpec `json:"script,omitempty" protobuf:"bytes,1,opt,name=scriptPath"`
 
@@ -92,16 +92,6 @@ type ScriptSourceSpec struct {
 	VolumeSource core.VolumeSource `json:"volumeSource,omitempty" protobuf:"bytes,2,opt,name=volumeSource"`
 }
 
-func (db *MongoDBDatabase) SetCondition(typ string, sts core.ConditionStatus, reason string, msg string) {
-	db.Status.Conditions = apiv1.SetCondition(db.Status.Conditions, apiv1.Condition{
-		Type:               typ,
-		Status:             sts,
-		LastTransitionTime: metav1.Time{},
-		Reason:             reason,
-		Message:            msg,
-	})
-}
-
 // MongoDBDatabaseStatus defines the observed state of MongoDBDatabase
 type MongoDBDatabaseStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
@@ -112,6 +102,9 @@ type MongoDBDatabaseStatus struct {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.phase"
+// +kubebuilder:printcolumn:name="DatabaseName",type="string",JSONPath=".spec.databaseSchema.name"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // MongoDBDatabase is the Schema for the mongodbdatabases API
 type MongoDBDatabase struct {

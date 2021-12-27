@@ -53,7 +53,7 @@ ENVTEST_ASSETS_DIR=$(shell pwd)/testbin
 test: manifests generate fmt vet ## Run tests.
 	mkdir -p ${ENVTEST_ASSETS_DIR}
 	test -f ${ENVTEST_ASSETS_DIR}/setup-envtest.sh || curl -sSLo ${ENVTEST_ASSETS_DIR}/setup-envtest.sh https://raw.githubusercontent.com/kubernetes-sigs/controller-runtime/v0.8.3/hack/setup-envtest.sh
-	source ${ENVTEST_ASSETS_DIR}/setup-envtest.sh; fetch_envtest_tools $(ENVTEST_ASSETS_DIR); setup_envtest_env $(ENVTEST_ASSETS_DIR); go test ./... -coverprofile cover.out
+	source ${ENVTEST_ASSETS_DIR}/setup-envtest.sh; fetch_envtest_tools $(ENVTEST_ASSETS_DIR); setup_envtest_env $(ENVTEST_ASSETS_DIR); cd $(shell pwd)/controllers/schema; ginkgo -coverprofile cover.out
 
 ##@ Build
 
@@ -107,10 +107,73 @@ rm -rf $$TMP_DIR ;\
 }
 endef
 
+#
+#REGISTRY ?= kubedb
+#GINKGO_ARGS ?=
+#TEST_ARGS   ?=
+#OS   := $(if $(GOOS),$(GOOS),$(shell go env GOOS))
+#ARCH := $(if $(GOARCH),$(GOARCH),$(shell go env GOARCH))
+#GO_VERSION       ?= 1.17
+#BUILD_IMAGE      ?= appscode/golang-dev:$(GO_VERSION)
+#
+#VERSION          := $(shell git describe --tags --always --dirty)
+#version_strategy := commit_hash
+#ifdef git_tag
+#	VERSION := $(git_tag)
+#	version_strategy := tag
+#else
+#	ifeq (,$(findstring $(git_branch),master HEAD))
+#		ifneq (,$(patsubst release-%,,$(git_branch)))
+#			VERSION := $(git_branch)
+#			version_strategy := branch
+#		endif
+#	endif
+#endif
+#
+## Directories that we need created to build/test.
+#BUILD_DIRS  := bin/$(OS)_$(ARCH)     \
+#               .go/bin/$(OS)_$(ARCH) \
+#               hack/config           \
+#               $(HOME)/.credentials  \
+#               $(HOME)/.kube
+#
+#$(BUILD_DIRS):
+#	@mkdir -p $@
+#
+#.PHONY: e2e
+#e2e: $(BUILD_DIRS)
+#	@docker run                                                 \
+#	    -i                                                      \
+#	    --rm                                                    \
+#	    -u $$(id -u):$$(id -g)                                  \
+#	    -v $$(pwd):/src                                         \
+#	    -w /src                                                 \
+#	    --net=host                                              \
+#	    -v $(HOME)/.kube:/.kube                                 \
+#	    -v $(HOME)/.minikube:$(HOME)/.minikube                  \
+#	    -v $(HOME)/.credentials:$(HOME)/.credentials            \
+#	    -v $$(pwd)/.go/bin/$(OS)_$(ARCH):/go/bin                \
+#	    -v $$(pwd)/.go/bin/$(OS)_$(ARCH):/go/bin/$(OS)_$(ARCH)  \
+#	    -v $$(pwd)/.go/cache:/.cache                            \
+#	    --env HTTP_PROXY=$(HTTP_PROXY)                          \
+#	    --env HTTPS_PROXY=$(HTTPS_PROXY)                        \
+#	    --env KUBECONFIG=$(KUBECONFIG)                          \
+#	    --env-file=$$(pwd)/hack/config/.env                     \
+#	    $(BUILD_IMAGE)                                          \
+#	    /bin/bash -c "                                          \
+#	    	GOCACHE=/tmp/										\
+#	        ARCH=$(ARCH)                                        \
+#	        OS=$(OS)                                            \
+#	        VERSION=$(VERSION)                                  \
+#	        DOCKER_REGISTRY=$(REGISTRY)                         \
+#	        TAG=$(TAG)                                          \
+#	        KUBECONFIG=$${KUBECONFIG#$(HOME)}                   \
+#	        GINKGO_ARGS='$(GINKGO_ARGS)'                        \
+#	        TEST_ARGS='$(TEST_ARGS)'                            \
+#	        ./hack/e2e.sh                                       \
+#	    "
 
-
-
-
+# --------------------------------------------------------------------------------
 export REGISTRY ?= arnobkumarsaha
 export JOB_NAME ?= kubernetes-go-test
 
@@ -132,3 +195,5 @@ log:
 	kubectl logs `kubectl get pods --selector=job-name=$(JOB_NAME) --output=jsonpath='{.items[*].metadata.name}'`
 
 runjob: push apply log
+
+everything: uninstall build install runjob

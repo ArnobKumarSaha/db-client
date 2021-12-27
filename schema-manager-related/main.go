@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"os"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -15,8 +16,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	appcat "kmodules.xyz/custom-resources/client/clientset/versioned/scheme"
+	kubedbscheme "kubedb.dev/apimachinery/client/clientset/versioned/scheme"
 	schemav1alpha1 "kubedb.dev/schema-manager/apis/schema/v1alpha1"
 	schemacontrollers "kubedb.dev/schema-manager/controllers/schema"
+	kubevaultscheme "kubevault.dev/apimachinery/client/clientset/versioned/scheme"
+	stashScheme "stash.appscode.dev/apimachinery/client/clientset/versioned/scheme"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -27,8 +32,11 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
+	utilruntime.Must(kubedbscheme.AddToScheme(scheme))
+	utilruntime.Must(kubevaultscheme.AddToScheme(scheme))
 	utilruntime.Must(schemav1alpha1.AddToScheme(scheme))
+	utilruntime.Must(stashScheme.AddToScheme(scheme))
+	utilruntime.Must(appcat.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -48,6 +56,7 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	time := time.Minute * 3
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
@@ -56,6 +65,7 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "82ac5e1d.kubedb.com",
+		SyncPeriod:             &time,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
