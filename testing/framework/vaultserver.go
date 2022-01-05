@@ -14,7 +14,7 @@ func (i *Invocation) GetVaultServerSpec() *kvm.VaultServer {
 	return &kvm.VaultServer{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      VaultName,
-			Namespace: i.Namespace(),
+			Namespace: i.vaultNamespace,
 		},
 		Spec: kvm.VaultServerSpec{
 			Version:  "1.8.2",
@@ -78,7 +78,7 @@ func (i *TestOptions) DeleteVaultServer() error {
 	// Get & delete the vault secret manually
 	var v_sec corev1.Secret
 	err = i.myClient.Get(context.TODO(), types.NamespacedName{
-		Namespace: i.Namespace(),
+		Namespace: i.vaultNamespace,
 		Name:      VaultName + "-keys",
 	}, &v_sec)
 	err = i.myClient.Delete(context.TODO(), &v_sec)

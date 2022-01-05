@@ -11,7 +11,7 @@ func (i *Invocation) GetTheRunnerJob() *batchv1.Job {
 	return &batchv1.Job{
 		ObjectMeta: meta.ObjectMeta{
 			Name:      RunnerJobName,
-			Namespace: i.Namespace(),
+			Namespace: i.schemaNamespace,
 		},
 		Spec: batchv1.JobSpec{
 			Template: corev1.PodTemplateSpec{
@@ -19,7 +19,7 @@ func (i *Invocation) GetTheRunnerJob() *batchv1.Job {
 					Containers: []corev1.Container{
 						{
 							Name:            "kubernetes-go-test",
-							Image:           "arnobkumarsaha/kubernetes-go-test",
+							Image:           OperatorImageName,
 							ImagePullPolicy: corev1.PullAlways,
 						},
 					},
@@ -39,7 +39,7 @@ func (i *Invocation) GetServiceAccountSpec() *corev1.ServiceAccount {
 	return &corev1.ServiceAccount{
 		ObjectMeta: meta.ObjectMeta{
 			Name:      ServiceAccountName,
-			Namespace: i.Namespace(),
+			Namespace: i.schemaNamespace,
 		},
 	}
 }
@@ -50,7 +50,7 @@ func (i *TestOptions) CreateRunnerJob() error {
 	if err != nil {
 		return err
 	}
-	err = i.myClient.Create(context.TODO(), i.InitJob)
+	err = i.myClient.Create(context.TODO(), i.RunnerJob)
 	return err
 }
 
@@ -66,7 +66,7 @@ func (i *TestOptions) DeleteRunnerJob() error {
 	for _, pod := range pods.Items {
 		owners := pod.OwnerReferences
 		for _, owner := range owners {
-			if owner.UID == i.InitJob.UID {
+			if owner.UID == i.RunnerJob.UID {
 				err = i.myClient.Delete(context.TODO(), &pod)
 				if err != nil {
 					return err
@@ -74,6 +74,6 @@ func (i *TestOptions) DeleteRunnerJob() error {
 			}
 		}
 	}
-	err = i.myClient.Delete(context.TODO(), i.InitJob)
+	err = i.myClient.Delete(context.TODO(), i.RunnerJob)
 	return err
 }

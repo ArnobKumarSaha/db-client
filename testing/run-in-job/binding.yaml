@@ -9,4 +9,4 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: my-test-sa
-  namespace: wow
+  namespace: dev

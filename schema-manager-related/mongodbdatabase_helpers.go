@@ -27,7 +27,7 @@ func (db *MongoDBDatabase) GetMongoRestoreSessionName() string {
 	return db.GetName() + "-restore-session"
 }
 
-// For Admin
+// For MongoDB Admin Role
 func (db *MongoDBDatabase) GetMongoAdminRoleName() string {
 	return db.GetName() + MongoPrefix + "-admin-role"
 }
@@ -44,16 +44,6 @@ func (db *MongoDBDatabase) GetMongoSecretEngineName() string {
 
 func (db *MongoDBDatabase) GetAuthSecretName(dbServerName string) string {
 	return dbServerName + "-auth"
-}
-
-// ContainsString function is to check and remove string from a slice of strings.
-func ContainsString(slice []string, s string) bool {
-	for _, item := range slice {
-		if item == s {
-			return true
-		}
-	}
-	return false
 }
 
 func (db *MongoDBDatabase) SetCondition(typ SchemaDatabaseCondition, sts corev1.ConditionStatus, reason SchemaDatabaseReason, msg string) []apiv1.Condition {

@@ -34,9 +34,10 @@ import (
 )
 
 /*
+this will be called from mongodb.go-> Reconcile()
 ensurePrimaryService
 If any verb changed , Record the event
- */
+*/
 func (c *Controller) ensureService(db *api.MongoDB) (kutil.VerbType, error) {
 	// create database Service
 	vt, err := c.ensurePrimaryService(db)
@@ -55,13 +56,14 @@ func (c *Controller) ensureService(db *api.MongoDB) (kutil.VerbType, error) {
 }
 
 /*
+this will be called from ensureService
 Create a objectMeta, an owner reference & get the service template from db.Spec
 If shardTopology exists, service selector is MongosSelectors. Otherwise, service selector is OffshootSelectors.
 CreateOrPatchService
 	assign ownerReference , selector, Annotations, Labels,
 	PatchServicePorts, MergeServicePorts
 	Also copy the svcTemplate.Spec. things to svc.Spec
- */
+*/
 func (c *Controller) ensurePrimaryService(db *api.MongoDB) (kutil.VerbType, error) {
 	meta := metav1.ObjectMeta{
 		Name:      db.OffshootName(),
@@ -119,8 +121,8 @@ func (c *Controller) ensurePrimaryService(db *api.MongoDB) (kutil.VerbType, erro
 }
 
 /*
-
- */
+this will be called from mongodb.go-> Reconcile()
+*/
 func (c *Controller) ensureStatsService(db *api.MongoDB) (kutil.VerbType, error) {
 	// return if monitoring is not prometheus
 	if db.Spec.Monitor == nil || db.Spec.Monitor.Agent.Vendor() != mona.VendorPrometheus {
@@ -186,6 +188,9 @@ func (c *Controller) ensureStatsService(db *api.MongoDB) (kutil.VerbType, error)
 	return vt, nil
 }
 
+/*
+this will be called from mongodb.go-> Reconcile()
+*/
 func (c *Reconciler) EnsureGoverningService(db *api.MongoDB) error {
 	owner := metav1.NewControllerRef(db, api.SchemeGroupVersion.WithKind(api.ResourceKindMongoDB))
 

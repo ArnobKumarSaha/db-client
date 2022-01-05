@@ -74,8 +74,7 @@ type MongoDBDatabaseReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.10.0/pkg/reconcile
 func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("mongodbdatabase", req.NamespacedName)
-
-	// First Get the actual CRD object of type MongoDBDatabase
+	// Get the actual CRD object of type MongoDBDatabase
 	var obj smv1a1.MongoDBDatabase
 	if err := r.Client.Get(ctx, req.NamespacedName, &obj); err != nil {
 		log.Error(nil, "unable to fetch mongodb Database", req.Name, req.Namespace)
@@ -84,34 +83,10 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Getting The Mongo Server object
-	var mongo kdm.MongoDB
-	err := r.Client.Get(ctx, types.NamespacedName{
-		Namespace: obj.Spec.DatabaseRef.Namespace,
-		Name:      obj.Spec.DatabaseRef.Name,
-	}, &mongo)
-	if err != nil {
-		log.Error(err, "Unable to get the Mongo Object")
+	mongo, _, err, goForward := r.getMongoDBAndVaultServer(ctx, &obj, log)
+	if err != nil || !goForward {
 		return ctrl.Result{}, err
 	}
-
-	// Getting The Vault Server object
-	var vault kvm_server.VaultServer
-	err = r.Client.Get(ctx, types.NamespacedName{
-		Namespace: obj.Spec.VaultRef.Namespace,
-		Name:      obj.Spec.VaultRef.Name,
-	}, &vault)
-	if err != nil {
-		log.Error(err, "Unable to get the Vault server Object")
-		return ctrl.Result{}, err
-	}
-	log.Info("Mongo Object and VaultServer object both have been found.")
-
-	// If any of MongoDB & VaultServer is not Ready, wait until Reconcile call
-	if mongo.Status.Phase != kdm.DatabasePhaseReady || vault.Status.Phase != kvm_server.VaultServerPhaseReady {
-		return ctrl.Result{}, nil
-	}
-
 	if goForward, err := r.ensureOrDeleteFinalizer(ctx, &obj, mongo, log); !goForward {
 		// goForward == false means, some error has been occurred or Finalizer has been removed. Error can be nil or !nil , doesn't matter
 		return ctrl.Result{}, err
@@ -121,26 +96,94 @@ func (r *MongoDBDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// This style gives us the chance to update Status for MongoDBDatabase only once, not after each 'ensure' functions
 	err = r.runMongoSchema(ctx, &obj, mongo, log)
 
-	phase := GetPhaseFromCondition(obj.Status.Conditions, obj.Spec.Restore != nil)
-	if obj.Status.Phase != phase {
-		obj.Status.Phase = phase
-	}
-	if _, _, err2 := clientutil.PatchStatus(r.Client, &smv1a1.MongoDBDatabase{
-		ObjectMeta: obj.ObjectMeta,
-	}, func(object client.Object, createOp bool) client.Object {
-		db := object.(*smv1a1.MongoDBDatabase)
-		db.Status = obj.Status
-		return db
-	}); err2 != nil {
-		log.Error(err2, "Error occurred when Patching the MongoDBDatabase's status")
+	if err2 := r.updateSchemaMongoDBDatabaseStatus(ctx, &obj, log, ""); err2 != nil {
 		return ctrl.Result{}, err2
 	}
-
 	return ctrl.Result{}, err
 }
 
+func (r *MongoDBDatabaseReconciler) getMongoDBAndVaultServer(ctx context.Context, obj *smv1a1.MongoDBDatabase, log logr.Logger) (kdm.MongoDB, kvm_server.VaultServer, error, bool) {
+	if obj.Status.Phase == "" {
+		// updateMongoDBDatabaseStatus is called here to get "initializing" phase in MongoDBDatabase
+		if err2 := r.updateSchemaMongoDBDatabaseStatus(ctx, obj, log, smv1a1.SchemaDatabasePhaseWaiting); err2 != nil {
+			log.Error(err2, "Error occurred when updating the MongoDBDatabase status")
+			return kdm.MongoDB{}, kvm_server.VaultServer{}, err2, false
+		}
+	}
+	var mongo kdm.MongoDB
+	var vault kvm_server.VaultServer
+	// Getting The Mongo Server object
+	err := r.Client.Get(ctx, types.NamespacedName{
+		Namespace: obj.Spec.DatabaseRef.Namespace,
+		Name:      obj.Spec.DatabaseRef.Name,
+	}, &mongo)
+	r.updateStatusForMongoDB(ctx, obj, &mongo)
+	if err != nil {
+		log.Error(err, "Unable to get the Mongo Object")
+		return kdm.MongoDB{}, kvm_server.VaultServer{}, err, false
+	}
+
+	// Getting The Vault Server object
+	err = r.Client.Get(ctx, types.NamespacedName{
+		Namespace: obj.Spec.VaultRef.Namespace,
+		Name:      obj.Spec.VaultRef.Name,
+	}, &vault)
+	r.updateStatusForVaultServer(ctx, obj, &vault)
+	if err != nil {
+		log.Error(err, "Unable to get the Vault server Object")
+		return mongo, kvm_server.VaultServer{}, err, false
+	}
+	log.Info("Mongo Object and VaultServer object both have been found.")
+
+	// If any of MongoDB & VaultServer is not Ready, wait until Reconcile call
+	if mongo.Status.Phase != kdm.DatabasePhaseReady || vault.Status.Phase != kvm_server.VaultServerPhaseReady {
+		return mongo, vault, nil, false
+	}
+	// They are ready, so reflect it in the MongoDBDatabase status
+	if err2 := r.updateSchemaMongoDBDatabaseStatus(ctx, obj, log, ""); err2 != nil {
+		log.Error(err2, "Error occurred when updating the MongoDBDatabase status")
+		return mongo, vault, err2, false
+	}
+	return mongo, vault, err, true
+}
+
+func (r *MongoDBDatabaseReconciler) updateStatusForMongoDB(ctx context.Context, obj *smv1a1.MongoDBDatabase, mongo *kdm.MongoDB) {
+	err := r.Get(ctx, types.NamespacedName{
+		Namespace: mongo.Namespace,
+		Name:      mongo.Name,
+	}, mongo)
+	if err != nil {
+		obj.Status.Conditions = obj.SetCondition(smv1a1.SchemaDatabaseConditionDBReady, corev1.ConditionFalse, smv1a1.SchemaDatabaseReason(err.Error()), "MongoDB is not created yet")
+		return
+	}
+	if !CheckMongoDBConditions(mongo) {
+		obj.Status.Conditions = obj.SetCondition(smv1a1.SchemaDatabaseConditionDBReady, corev1.ConditionFalse, smv1a1.SchemaDatabaseReasonDBReady, "MongoDB is provisioning")
+		return
+	}
+	obj.Status.Conditions = obj.SetCondition(smv1a1.SchemaDatabaseConditionDBReady, corev1.ConditionTrue, smv1a1.SchemaDatabaseReasonDBReady, "MongoDB is ready")
+}
+
+func (r *MongoDBDatabaseReconciler) updateStatusForVaultServer(ctx context.Context, obj *smv1a1.MongoDBDatabase, vault *kvm_server.VaultServer) {
+	err := r.Get(ctx, types.NamespacedName{
+		Namespace: vault.Namespace,
+		Name:      vault.Name,
+	}, vault)
+	if err != nil {
+		obj.Status.Conditions = obj.SetCondition(smv1a1.SchemaDatabaseConditionVaultReady, corev1.ConditionFalse, smv1a1.SchemaDatabaseReason(err.Error()), "VaultServer is not created yet")
+		return
+	}
+	if !CheckVaultConditions(vault) {
+		obj.Status.Conditions = obj.SetCondition(smv1a1.SchemaDatabaseConditionVaultReady, corev1.ConditionFalse, smv1a1.SchemaDatabaseReasonVaultReady, "VaultServer is provisioning")
+		return
+	}
+	obj.Status.Conditions = obj.SetCondition(smv1a1.SchemaDatabaseConditionVaultReady, corev1.ConditionTrue, smv1a1.SchemaDatabaseReasonVaultReady, "VaultServer is ready")
+}
+
+/*
+Ensuring the required resources one-by-one :  SecretEngine, MongoDbRole, ServiceAccount, SecretAccessRequest
+It also handles the Init-Restore case, by calling corresponding methods
+*/
 func (r *MongoDBDatabaseReconciler) runMongoSchema(ctx context.Context, obj *smv1a1.MongoDBDatabase, mongo kdm.MongoDB, log logr.Logger) error {
-	// Ensuring the required resources one-by-one
 	var fetchedSecretEngine *kvm_engine.SecretEngine
 	var err error
 	if fetchedSecretEngine, err = r.ensureSecretEngine(ctx, obj, log); err != nil {
@@ -153,7 +196,7 @@ func (r *MongoDBDatabaseReconciler) runMongoSchema(ctx context.Context, obj *smv
 	if fetchedSecretEngine.Status.Phase != smv1a1.SecretEnginePhaseSuccess || fetchedRole.Status.Phase != kvm_engine.RolePhaseSuccess {
 		return nil
 	}
-	if _, err = r.ensureServiceAccount(obj, log); err != nil {
+	if _, err = r.ensureServiceAccount(ctx, obj, log); err != nil {
 		return err
 	}
 	var fetchedAccessRequest *kvm_engine.SecretAccessRequest
@@ -187,13 +230,15 @@ func (r *MongoDBDatabaseReconciler) runMongoSchema(ctx context.Context, obj *smv
 			log.Error(err, "Error occurred when ensuring the restore session")
 			return err
 		}
-		if CheckRestoreSessionPhase(res) /*&& (obj.Spec.Init == nil || !obj.Spec.Init.Initialized) */ {
+		if (obj.Spec.Init == nil || !obj.Spec.Init.Initialized) && CheckRestoreSessionPhaseSucceed(res) {
 			obj.Spec.Init = &smv1a1.InitSpec{
 				Initialized: true,
 			}
 		}
 		return nil
 	}
+
+	// as makeTheInitJob is only called once (hence updateStatusForInitJob also) if job is not created yet, We need to get the updated status for job
 	r.updateStatusForInitJob(ctx, obj, &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      obj.GetMongoInitJobName(),
@@ -226,12 +271,37 @@ func (r *MongoDBDatabaseReconciler) runMongoSchema(ctx context.Context, obj *smv
 	return nil
 }
 
+func (r *MongoDBDatabaseReconciler) updateSchemaMongoDBDatabaseStatus(ctx context.Context, obj *smv1a1.MongoDBDatabase, log logr.Logger, typ smv1a1.SchemaDatabasePhase) error {
+	var phase smv1a1.SchemaDatabasePhase
+	if typ == smv1a1.SchemaDatabasePhaseIgnored {
+		phase = typ
+	} else {
+		phase = GetPhaseFromCondition(obj.Status.Conditions, obj.Spec.Restore != nil)
+	}
+	if obj.Status.Phase != phase {
+		obj.Status.Phase = phase
+	}
+
+	if _, _, err2 := clientutil.PatchStatus(ctx, r.Client, &smv1a1.MongoDBDatabase{
+		ObjectMeta: obj.ObjectMeta,
+	}, func(object client.Object, createOp bool) client.Object {
+		db := object.(*smv1a1.MongoDBDatabase)
+		db.Status = obj.Status
+		return db
+	}); err2 != nil {
+		log.Error(err2, "Error occurred when Patching the MongoDBDatabase's status")
+		return err2
+	}
+	return nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *MongoDBDatabaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&smv1a1.MongoDBDatabase{}).
 		Owns(&kvm_engine.SecretAccessRequest{}).
 		Owns(&kvm_engine.SecretEngine{}).
+		Owns(&kvm_engine.MongoDBRole{}).
 		Owns(&batchv1.Job{}).
 		Owns(&stash.RestoreSession{}).
 		Watches(&source.Kind{Type: &kdm.MongoDB{}}, handler.EnqueueRequestsFromMapFunc(r.getHandlerFuncForMongoDB())).
@@ -291,9 +361,14 @@ func (r *MongoDBDatabaseReconciler) getHandlerFuncForVaultServer() handler.MapFu
 	}
 }
 
+/*
+delete any external resources associated with the obj. Ensure that delete implementation is idempotent and safe to invoke
+multiple times for same object. our finalizer is present, so lets handle any external dependency
+
+If we find the {UID: dbName} entry in the 'kubedb-system' database
+	Drop the 'dbName' database, & delete that corresponding entry
+*/
 func (r *MongoDBDatabaseReconciler) doExternalThingsBeforeDelete(ctx context.Context, obj *smv1a1.MongoDBDatabase, mongo *kdm.MongoDB, log logr.Logger) error {
-	// delete any external resources associated with the obj Ensure that delete implementation is idempotent and safe to invoke
-	// multiple times for same object. our finalizer is present, so lets handle any external dependency
 	mongoClient, err := dbClient.NewKubeDBClientBuilder(r.Client, mongo).WithContext(ctx).GetMongoClient()
 	defer mongoClient.Close()
 	if err != nil {
@@ -322,6 +397,11 @@ func (r *MongoDBDatabaseReconciler) doExternalThingsBeforeDelete(ctx context.Con
 	return nil
 }
 
+/*
+If the requested database already exists
+	return error
+Otherwise update-or-insert the corresponding entry accordingly
+*/
 func (r *MongoDBDatabaseReconciler) ensureEntryIntoDatabase(ctx context.Context, obj *smv1a1.MongoDBDatabase, mongo kdm.MongoDB, log logr.Logger) error {
 	mongoClient, err := dbClient.NewKubeDBClientBuilder(r.Client, &mongo).WithContext(ctx).GetMongoClient()
 	if err != nil {
@@ -332,10 +412,16 @@ func (r *MongoDBDatabaseReconciler) ensureEntryIntoDatabase(ctx context.Context,
 	name := obj.Spec.DatabaseSchema.Name
 
 	// For checking, if the Database named 'obj.Spec.DatabaseSchema.Name' already exist or not
-	_, err = mongoClient.Database(name).ListCollectionNames(ctx, bson.D{}) // collectionList
+	res, err := mongoClient.Database(name).ListCollectionNames(ctx, bson.D{}) // collectionList
 	if err != nil {
 		log.Error(err, "Error occurred when listing the Collection names of  database")
 		return err
+	}
+	if len(res) > 0 {
+		if err2 := r.updateSchemaMongoDBDatabaseStatus(ctx, obj, log, smv1a1.SchemaDatabasePhaseIgnored); err2 != nil {
+			return err2
+		}
+		return errors.New("database already exist")
 	}
 	// We are here means, Database doesn't already exist
 	valTrue := true
@@ -357,6 +443,13 @@ func (r *MongoDBDatabaseReconciler) ensureEntryIntoDatabase(ctx context.Context,
 	return nil
 }
 
+/*
+If obj is not requested for deletion & finalizerName is still not added:
+	ensureEntryIntroDatabase() + addFinalizer()
+else if obj is requested for deletion & finalizerName is found:
+	doExternalThingsBeforeDelete() + deleteFinalizer()
+In both case, Update the obj
+*/
 func (r *MongoDBDatabaseReconciler) ensureOrDeleteFinalizer(ctx context.Context, obj *smv1a1.MongoDBDatabase, mongo kdm.MongoDB, log logr.Logger) (bool, error) {
 	finalizerName := smv1a1.GroupVersion.Group
 	// examine DeletionTimestamp to determine if object is under deletion
@@ -398,7 +491,7 @@ func (r *MongoDBDatabaseReconciler) ensureOrDeleteFinalizer(ctx context.Context,
 
 // Create or Patch the Secret Engine
 func (r *MongoDBDatabaseReconciler) ensureSecretEngine(ctx context.Context, obj *smv1a1.MongoDBDatabase, log logr.Logger) (*kvm_engine.SecretEngine, error) {
-	fetchedSecretEngine, _, err := clientutil.CreateOrPatch(r.Client, &kvm_engine.SecretEngine{
+	fetchedSecretEngine, _, err := clientutil.CreateOrPatch(ctx, r.Client, &kvm_engine.SecretEngine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      obj.GetMongoSecretEngineName(),
 			Namespace: obj.Namespace,
@@ -448,7 +541,7 @@ func (r *MongoDBDatabaseReconciler) updateStatusForSecretEngine(ctx context.Cont
 
 // Create or Patch the MongoDBRole
 func (r *MongoDBDatabaseReconciler) ensureMongoDBRole(ctx context.Context, obj *smv1a1.MongoDBDatabase, log logr.Logger) (*kvm_engine.MongoDBRole, error) {
-	fetchedMongoDbRole, _, err := clientutil.CreateOrPatch(r.Client, &kvm_engine.MongoDBRole{
+	fetchedMongoDbRole, _, err := clientutil.CreateOrPatch(ctx, r.Client, &kvm_engine.MongoDBRole{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      obj.GetMongoAdminRoleName(),
 			Namespace: obj.Namespace,
@@ -489,8 +582,8 @@ func (r *MongoDBDatabaseReconciler) updateStatusForMongoDbRole(ctx context.Conte
 }
 
 // Create or Patch the service account
-func (r *MongoDBDatabaseReconciler) ensureServiceAccount(obj *smv1a1.MongoDBDatabase, log logr.Logger) (*corev1.ServiceAccount, error) {
-	fetchedServiceAccount, _, err := clientutil.CreateOrPatch(r.Client, &corev1.ServiceAccount{
+func (r *MongoDBDatabaseReconciler) ensureServiceAccount(ctx context.Context, obj *smv1a1.MongoDBDatabase, log logr.Logger) (*corev1.ServiceAccount, error) {
+	fetchedServiceAccount, _, err := clientutil.CreateOrPatch(ctx, r.Client, &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      obj.GetMongoAdminServiceAccountName(),
 			Namespace: obj.Namespace,
@@ -509,9 +602,14 @@ func (r *MongoDBDatabaseReconciler) ensureServiceAccount(obj *smv1a1.MongoDBData
 	return fetchedServiceAccount.(*corev1.ServiceAccount), nil
 }
 
-// Create or Patch the secret Access Request
+/*
+Create or Patch the secret Access Request
+assigning RoleRef & Subjects in the secretAccessRequest spec, where subjects.name = our serviceAccount name
+I auto Approval On : An approved condition will be set accordingly
+*/
 func (r *MongoDBDatabaseReconciler) ensureSecretAccessRequest(ctx context.Context, obj *smv1a1.MongoDBDatabase, log logr.Logger) (*kvm_engine.SecretAccessRequest, error) {
-	fetchedAccessRequest, _, err := clientutil.CreateOrPatch(r.Client, &kvm_engine.SecretAccessRequest{
+
+	fetchedAccessRequest, _, err := clientutil.CreateOrPatch(ctx, r.Client, &kvm_engine.SecretAccessRequest{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      obj.GetMongoAdminSecretAccessRequestName(),
 			Namespace: obj.Namespace,
@@ -549,15 +647,16 @@ func (r *MongoDBDatabaseReconciler) ensureSecretAccessRequest(ctx context.Contex
 		r.updateStatusForSecretAccessRequest(ctx, obj, fetchedAccessRequest.(*kvm_engine.SecretAccessRequest))
 		return fetchedAccessRequest.(*kvm_engine.SecretAccessRequest), nil
 	}
+
 	// user sets auto approval ON
 	sarForReturn := fetchedAccessRequest.(*kvm_engine.SecretAccessRequest)
 	sarForReturn.Status.Conditions = apiv1util.SetCondition(sarForReturn.Status.Conditions, apiv1util.Condition{
 		Type:    apiv1util.ConditionRequestApproved,
 		Status:  corev1.ConditionTrue,
-		Reason:  "ApprovedBySchemaManager",
+		Reason:  string(smv1a1.SchemaDatabaseAutoApprovalReason),
 		Message: "This was approved by: KubeDb SchemaManager",
 	})
-	tmpSar, _, err := clientutil.PatchStatus(r.Client, &kvm_engine.SecretAccessRequest{
+	tmpSar, _, err := clientutil.PatchStatus(ctx, r.Client, &kvm_engine.SecretAccessRequest{
 		ObjectMeta: sarForReturn.ObjectMeta,
 	}, func(object client.Object, createOp bool) client.Object {
 		insideSar := object.(*kvm_engine.SecretAccessRequest)
@@ -588,6 +687,43 @@ func (r *MongoDBDatabaseReconciler) updateStatusForSecretAccessRequest(ctx conte
 		return
 	}
 	obj.Status.Conditions = obj.SetCondition(smv1a1.SchemaDatabaseConditionSecretAccessRequestReady, corev1.ConditionTrue, smv1a1.SchemaDatabaseReasonSecretAccessRequestReady, "Secret access request is succeeded")
+}
+
+func (r *MongoDBDatabaseReconciler) setDefaultOptionsForJobContainer(container *corev1.Container, givenPodSpec offshootv1util.PodSpec) {
+	container.Resources = givenPodSpec.Resources
+	container.LivenessProbe = givenPodSpec.LivenessProbe
+	container.ReadinessProbe = givenPodSpec.ReadinessProbe
+	container.Lifecycle = givenPodSpec.Lifecycle
+	container.SecurityContext = givenPodSpec.ContainerSecurityContext
+}
+
+func (r *MongoDBDatabaseReconciler) getSSLArgsForJob(ctx context.Context, mongo kdm.MongoDB, sslArgs string, log logr.Logger) (string, error) {
+	if mongo.Spec.TLS == nil {
+		return "", fmt.Errorf("SSLMode in mongoDB object in enabled, but issuerRef is not given")
+	}
+	sslArgs = fmt.Sprintf("--tls --tlsCAFile %v/%v --tlsCertificateKeyFile %v/%v",
+		kdm.MongoCertDirectory, kdm.TLSCACertFileName, kdm.MongoCertDirectory, kdm.MongoClientFileName)
+	breakingVer, _ := semver.NewVersion("4.1")
+	exceptionVer, _ := semver.NewVersion("4.1.4")
+	var ver kd_catalog.MongoDBVersion
+	err := r.Client.Get(ctx, types.NamespacedName{
+		Name: mongo.Spec.Version,
+	}, &ver)
+	if err != nil {
+		log.Error(err, "Error when getting the MongoVersion object")
+		return "", err
+	}
+	currentVer, err := semver.NewVersion(ver.Spec.Version)
+	if err != nil {
+		log.Error(err, "Unable to parse MongoDB Version")
+		return "", err
+	}
+	if currentVer.Equal(exceptionVer) {
+		sslArgs = fmt.Sprintf("--tls --tlsCAFile=%v/%v --tlsPEMKeyFile=%v/%v", kdm.MongoCertDirectory, kdm.TLSCACertFileName, kdm.MongoCertDirectory, kdm.MongoClientFileName)
+	} else if currentVer.LessThan(breakingVer) {
+		sslArgs = fmt.Sprintf("--ssl --sslCAFile=%v/%v --sslPEMKeyFile=%v/%v", kdm.MongoCertDirectory, kdm.TLSCACertFileName, kdm.MongoCertDirectory, kdm.MongoClientFileName)
+	}
+	return sslArgs, nil
 }
 
 // It returns the initContainer spec by assigning Image, args, env & volumeMounts fields
@@ -702,7 +838,7 @@ func (r *MongoDBDatabaseReconciler) makeTheInitJob(ctx context.Context, obj *smv
 	}
 
 	// now actually create it or patch
-	createdJob, vt, err := clientutil.CreateOrPatch(r.Client, &batchv1.Job{
+	createdJob, vt, err := clientutil.CreateOrPatch(ctx, r.Client, &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      obj.GetMongoInitJobName(),
 			Namespace: obj.Namespace,
@@ -715,7 +851,7 @@ func (r *MongoDBDatabaseReconciler) makeTheInitJob(ctx context.Context, obj *smv
 			cont,
 		}
 		if isPodTemplateGiven {
-			setDefaultOptionsForJobContainer(&containers[0], givenPodSpec)
+			r.setDefaultOptionsForJobContainer(&containers[0], givenPodSpec)
 			job.Spec.Template.Spec.ServiceAccountName = givenPodSpec.ServiceAccountName
 			job.Spec.Template.Spec.NodeSelector = givenPodSpec.NodeSelector
 			job.Spec.Template.Spec.Affinity = givenPodSpec.Affinity
@@ -771,43 +907,6 @@ func (r *MongoDBDatabaseReconciler) updateStatusForInitJob(ctx context.Context, 
 	obj.Status.Conditions = obj.SetCondition(smv1a1.SchemaDatabaseConditionJobCompleted, corev1.ConditionTrue, smv1a1.SchemaDatabaseReasonJobCompleted, "Job is completed")
 }
 
-func setDefaultOptionsForJobContainer(container *corev1.Container, givenPodSpec offshootv1util.PodSpec) {
-	container.Resources = givenPodSpec.Resources
-	container.LivenessProbe = givenPodSpec.LivenessProbe
-	container.ReadinessProbe = givenPodSpec.ReadinessProbe
-	container.Lifecycle = givenPodSpec.Lifecycle
-	container.SecurityContext = givenPodSpec.ContainerSecurityContext
-}
-
-func (r *MongoDBDatabaseReconciler) getSSLArgsForJob(ctx context.Context, mongo kdm.MongoDB, sslArgs string, log logr.Logger) (string, error) {
-	if mongo.Spec.TLS == nil {
-		return "", fmt.Errorf("SSLMode in mongoDB object in enabled, but issuerRef is not given")
-	}
-	sslArgs = fmt.Sprintf("--tls --tlsCAFile %v/%v --tlsCertificateKeyFile %v/%v",
-		kdm.MongoCertDirectory, kdm.TLSCACertFileName, kdm.MongoCertDirectory, kdm.MongoClientFileName)
-	breakingVer, _ := semver.NewVersion("4.1")
-	exceptionVer, _ := semver.NewVersion("4.1.4")
-	var ver kd_catalog.MongoDBVersion
-	err := r.Client.Get(ctx, types.NamespacedName{
-		Name: mongo.Spec.Version,
-	}, &ver)
-	if err != nil {
-		log.Error(err, "Error when getting the MongoVersion object")
-		return "", err
-	}
-	currentVer, err := semver.NewVersion(ver.Spec.Version)
-	if err != nil {
-		log.Error(err, "Unable to parse MongoDB Version")
-		return "", err
-	}
-	if currentVer.Equal(exceptionVer) {
-		sslArgs = fmt.Sprintf("--tls --tlsCAFile=%v/%v --tlsPEMKeyFile=%v/%v", kdm.MongoCertDirectory, kdm.TLSCACertFileName, kdm.MongoCertDirectory, kdm.MongoClientFileName)
-	} else if currentVer.LessThan(breakingVer) {
-		sslArgs = fmt.Sprintf("--ssl --sslCAFile=%v/%v --sslPEMKeyFile=%v/%v", kdm.MongoCertDirectory, kdm.TLSCACertFileName, kdm.MongoCertDirectory, kdm.MongoClientFileName)
-	}
-	return sslArgs, nil
-}
-
 func (r *MongoDBDatabaseReconciler) copyRepositoryAndSecret(ctx context.Context, obj *smv1a1.MongoDBDatabase, log logr.Logger) error {
 	var repo repository.Repository
 	err := r.Get(ctx, types.NamespacedName{
@@ -818,7 +917,7 @@ func (r *MongoDBDatabaseReconciler) copyRepositoryAndSecret(ctx context.Context,
 		log.Error(err, "Can't get the Repository")
 		return err
 	}
-	fetcherdRepository, _, err := clientutil.CreateOrPatch(r.Client, &repository.Repository{
+	fetcherdRepository, _, err := clientutil.CreateOrPatch(ctx, r.Client, &repository.Repository{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      repo.Name,
 			Namespace: obj.Namespace,
@@ -845,7 +944,7 @@ func (r *MongoDBDatabaseReconciler) copyRepositoryAndSecret(ctx context.Context,
 		log.Error(err, "Can't get the secret")
 		return err
 	}
-	_, _, err = clientutil.CreateOrPatch(r.Client, &corev1.Secret{
+	_, _, err = clientutil.CreateOrPatch(ctx, r.Client, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      secret.Name,
 			Namespace: obj.Namespace,
@@ -879,6 +978,10 @@ func (r *MongoDBDatabaseReconciler) updateStatusForRepository(ctx context.Contex
 	obj.Status.Conditions = obj.SetCondition(smv1a1.SchemaDatabaseConditionRepositoryFound, corev1.ConditionTrue, smv1a1.SchemaDatabaseReasonRepositoryFound, "Repository is copied successfully")
 }
 
+/*
+this appbinding is same as the appbinding created in db namespace; Just .Spec.ClientConfig.Service.Name has been changed
+to access the db-service from different namespace
+*/
 func (r *MongoDBDatabaseReconciler) ensureAppbinding(ctx context.Context, obj *smv1a1.MongoDBDatabase, log logr.Logger) error {
 	/// Getting the root credential from db namespace to schema-manager namespace
 	var authSecret corev1.Secret
@@ -890,7 +993,7 @@ func (r *MongoDBDatabaseReconciler) ensureAppbinding(ctx context.Context, obj *s
 		log.Error(err, "Cant get the auth secret")
 		return err
 	}
-	_, _, err = clientutil.CreateOrPatch(r.Client, &corev1.Secret{
+	_, _, err = clientutil.CreateOrPatch(ctx, r.Client, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      authSecret.Name,
 			Namespace: obj.Namespace,
@@ -914,7 +1017,7 @@ func (r *MongoDBDatabaseReconciler) ensureAppbinding(ctx context.Context, obj *s
 		return err
 	}
 
-	fetchedAppbinding, _, err := clientutil.CreateOrPatch(r.Client, &appcatutil.AppBinding{
+	fetchedAppbinding, _, err := clientutil.CreateOrPatch(ctx, r.Client, &appcatutil.AppBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      appbinding.Name,
 			Namespace: obj.Namespace,
@@ -949,6 +1052,10 @@ func (r *MongoDBDatabaseReconciler) ensureAppbinding(ctx context.Context, obj *s
 	return nil
 }
 
+/*
+This is a utility function which will be used on ensureAppbinding's CreateOrPatch()
+when vault-secret will be used instead of the auth-secret
+*/
 func (r *MongoDBDatabaseReconciler) getVaultCreatedSecretName(ctx context.Context, obj *smv1a1.MongoDBDatabase, log logr.Logger) (string, error) {
 	var sar kvm_engine.SecretAccessRequest
 	err := r.Get(ctx, types.NamespacedName{
@@ -978,7 +1085,11 @@ func (r *MongoDBDatabaseReconciler) updateStatusForAppbinding(ctx context.Contex
 	obj.Status.Conditions = obj.SetCondition(smv1a1.SchemaDatabaseConditionAppbindingFound, corev1.ConditionTrue, smv1a1.SchemaDatabaseReasonAppbindingFound, "Appbinding creation succeeded")
 }
 
-// Create or Patch the RestoreSession
+/*
+Create or Patch the RestoreSession
+Task, Target.ref, Target.Rules & Repository.Name fields will be set of the restoreSession Spec
+The task Name has been taken by getting the MongoDBVersion object
+*/
 func (r *MongoDBDatabaseReconciler) ensureRestoreSession(ctx context.Context, obj *smv1a1.MongoDBDatabase, mongo kdm.MongoDB, log logr.Logger) (*stash.RestoreSession, error) {
 	// Getting the  MongoDBVersion object
 	var mongoVer kd_catalog.MongoDBVersion
@@ -990,7 +1101,7 @@ func (r *MongoDBDatabaseReconciler) ensureRestoreSession(ctx context.Context, ob
 		return nil, err
 	}
 
-	fetchedRestoreSession, _, err := clientutil.CreateOrPatch(r.Client, &stash.RestoreSession{
+	fetchedRestoreSession, _, err := clientutil.CreateOrPatch(ctx, r.Client, &stash.RestoreSession{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      obj.GetMongoRestoreSessionName(),
 			Namespace: obj.Namespace,
@@ -1037,12 +1148,16 @@ func (r *MongoDBDatabaseReconciler) updateStatusForRestoreSession(ctx context.Co
 		Name:      rs.Name,
 	}, &restore)
 	if err != nil {
-		obj.Status.Conditions = obj.SetCondition(smv1a1.SchemaDatabaseConditionRestoreSessionSucceed, corev1.ConditionFalse, smv1a1.SchemaDatabaseReason(err.Error()), "RestoreSession is not created yet")
+		obj.Status.Conditions = obj.SetCondition(smv1a1.SchemaDatabaseConditionRestoreSession, corev1.ConditionFalse, smv1a1.SchemaDatabaseReason(err.Error()), "RestoreSession is not created yet")
 		return
 	}
-	if !CheckRestoreSessionPhase(&restore) {
-		obj.Status.Conditions = obj.SetCondition(smv1a1.SchemaDatabaseConditionRestoreSessionSucceed, corev1.ConditionFalse, smv1a1.SchemaDatabaseReasonRestoreSessionSucceed, "Restoring process is running")
+	if CheckRestoreSessionPhaseFailed(&restore) {
+		obj.Status.Conditions = obj.SetCondition(smv1a1.SchemaDatabaseConditionRestoreSession, corev1.ConditionTrue, smv1a1.SchemaDatabaseReasonRestoreSessionSFailed, "Restoring process is failed")
 		return
 	}
-	obj.Status.Conditions = obj.SetCondition(smv1a1.SchemaDatabaseConditionRestoreSessionSucceed, corev1.ConditionTrue, smv1a1.SchemaDatabaseReasonRestoreSessionSucceed, "RestoreSession creation succeeded")
+	if CheckRestoreSessionPhaseSucceed(&restore) {
+		obj.Status.Conditions = obj.SetCondition(smv1a1.SchemaDatabaseConditionRestoreSession, corev1.ConditionTrue, smv1a1.SchemaDatabaseReasonRestoreSessionSucceed, "Restoring process is succeeded")
+		return
+	}
+	obj.Status.Conditions = obj.SetCondition(smv1a1.SchemaDatabaseConditionRestoreSession, corev1.ConditionFalse, smv1a1.SchemaDatabaseReasonRestoreSessionSucceed, "Restoring process is running")
 }

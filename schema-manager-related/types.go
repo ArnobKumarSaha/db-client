@@ -18,10 +18,12 @@ type SchemaDatabasePhase string
 const (
 	// Phase 'Running' if it is currently working with the objects, on which it is dependant on.
 	// 'succeeded' if all of them is successful, 'failed' if any of them is failed
-	SchemaDatabasePhaseRunning      SchemaDatabasePhase = "Running"
-	SchemaDatabasePhaseSucceeded    SchemaDatabasePhase = "Succeeded"
-	SchemaDatabasePhaseFailed       SchemaDatabasePhase = "Failed"
-	SchemaDatabasePhaseInitializing SchemaDatabasePhase = "Initializing"
+	SchemaDatabasePhaseWaiting    SchemaDatabasePhase = "waiting"
+	SchemaDatabasePhaseProcessing SchemaDatabasePhase = "Processing"
+	SchemaDatabasePhaseRunning    SchemaDatabasePhase = "Running"
+	SchemaDatabasePhaseIgnored    SchemaDatabasePhase = "Ignored"
+	SchemaDatabasePhaseSucceeded  SchemaDatabasePhase = "Succeeded"
+	SchemaDatabasePhaseFailed     SchemaDatabasePhase = "Failed"
 )
 
 type SchemaDatabaseCondition string
@@ -38,9 +40,9 @@ const (
 	SchemaDatabaseConditionMysqlRoleReady    SchemaDatabaseCondition = "MysqlRoleReady"
 	SchemaDatabaseConditionMariaDBRoleReady  SchemaDatabaseCondition = "MariaDBRoleReady"
 	// Stash related
-	SchemaDatabaseConditionRepositoryFound       SchemaDatabaseCondition = "RepositoryFound"
-	SchemaDatabaseConditionAppbindingFound       SchemaDatabaseCondition = "AppbindingFound"
-	SchemaDatabaseConditionRestoreSessionSucceed SchemaDatabaseCondition = "RestoreSessionSucceeded"
+	SchemaDatabaseConditionRepositoryFound SchemaDatabaseCondition = "RepositoryFound"
+	SchemaDatabaseConditionAppbindingFound SchemaDatabaseCondition = "AppbindingFound"
+	SchemaDatabaseConditionRestoreSession  SchemaDatabaseCondition = "RestoreSession"
 )
 
 type SchemaDatabaseReason string
@@ -60,6 +62,9 @@ const (
 	SchemaDatabaseReasonRepositoryFound       SchemaDatabaseReason = "RepositoryIsFound"
 	SchemaDatabaseReasonAppbindingFound       SchemaDatabaseReason = "AppbindingIsFound"
 	SchemaDatabaseReasonRestoreSessionSucceed SchemaDatabaseReason = "RestoreSessionIsSucceeded"
+	SchemaDatabaseReasonRestoreSessionSFailed SchemaDatabaseReason = "RestoreSessionIsFailed"
+
+	SchemaDatabaseAutoApprovalReason SchemaDatabaseReason = "ApprovedBySchemaManager"
 )
 
 const (

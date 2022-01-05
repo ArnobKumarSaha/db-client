@@ -8,19 +8,42 @@ import (
 )
 
 func (f *Framework) Namespace() string {
-	return f.namespace
+	return f.schemaNamespace
 }
 
-func (f *Framework) CreateNamespace() error {
+func (f *Framework) CreateNamespaces() error {
 	obj := &core.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: f.namespace,
+			Name: SchemaNamespace, //f.schemaNamespace,
 		},
 	}
 	_, err := f.kubeClient.CoreV1().Namespaces().Create(context.TODO(), obj, metav1.CreateOptions{})
+	if err != nil {
+		return err
+	}
+
+	obj.Name = DatabaseNamespace //f.databaseNamespace
+	_, err = f.kubeClient.CoreV1().Namespaces().Create(context.TODO(), obj, metav1.CreateOptions{})
+	if err != nil {
+		return err
+	}
+
+	obj.Name = VaultNamespace //f.vaultNamespace
+	_, err = f.kubeClient.CoreV1().Namespaces().Create(context.TODO(), obj, metav1.CreateOptions{})
 	return err
 }
 
-func (f *Framework) DeleteNamespace() error {
-	return f.kubeClient.CoreV1().Namespaces().Delete(context.TODO(), f.namespace, meta_util.DeleteInForeground())
+func (f *Framework) DeleteNamespaces() error {
+	err := f.kubeClient.CoreV1().Namespaces().Delete(context.TODO(), VaultNamespace /*f.vaultNamespace*/, meta_util.DeleteInForeground())
+	if err != nil {
+		return err
+	}
+
+	err = f.kubeClient.CoreV1().Namespaces().Delete(context.TODO(), DatabaseNamespace /*f.databaseNamespace*/, meta_util.DeleteInForeground())
+	if err != nil {
+		return err
+	}
+
+	err = f.kubeClient.CoreV1().Namespaces().Delete(context.TODO(), SchemaNamespace /*f.schemaNamespace*/, meta_util.DeleteInForeground())
+	return err
 }

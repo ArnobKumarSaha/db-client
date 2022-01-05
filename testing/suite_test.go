@@ -119,15 +119,12 @@ var _ = BeforeSuite(func() {
 
 	// Create namespace
 	By("Using namespace " + framework.RootFramework.Namespace())
-	err = framework.RootFramework.CreateNamespace()
+	err = framework.RootFramework.CreateNamespaces()
 	Expect(err).NotTo(HaveOccurred())
-
-	framework.RootFramework.EventuallyCRD().Should(Succeed())
-
 }, 60)
 
 var _ = AfterSuite(func() {
 	By("Deleting Namespace")
-	err := framework.RootFramework.DeleteNamespace()
+	err := framework.RootFramework.DeleteNamespaces()
 	Expect(err).NotTo(HaveOccurred())
 })

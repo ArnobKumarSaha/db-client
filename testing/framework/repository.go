@@ -3,7 +3,9 @@ package framework
 import (
 	"context"
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	store "kmodules.xyz/objectstore-api/api/v1"
 	repository "stash.appscode.dev/apimachinery/apis/stash/v1alpha1"
 )
@@ -12,22 +14,21 @@ func (i *Invocation) GetRepositorySpec(dbType string) *repository.Repository {
 	ret := &repository.Repository{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      RepositoryName,
-			Namespace: i.Namespace(),
+			Namespace: i.databaseNamespace,
 		},
 		Spec: repository.RepositorySpec{
 			Backend: store.Backend{
-				StorageSecretName: RepositorySecretName,
+				StorageSecretName: MinioRepositorySecretName,
 				S3: &store.S3Spec{
-					Endpoint: "https://us-southeast-1.linodeobjects.com",
+					Endpoint: "http://minio.minio.svc:9000",
 					Bucket:   "backup-mongo",
-					Prefix:   "alone", // this will be changed according to dbType
-					Region:   "us-southeast-1",
+					Prefix:   "standalone", // this will be changed according to dbType
 				},
 			},
 		},
 	}
 	if dbType == Sharded {
-		ret.Spec.Backend.S3.Prefix = "demo"
+		ret.Spec.Backend.S3.Prefix = "shard"
 	} else if dbType == ReplicaSet {
 		ret.Spec.Backend.S3.Prefix = "replica"
 	}
@@ -36,8 +37,8 @@ func (i *Invocation) GetRepositorySpec(dbType string) *repository.Repository {
 
 const (
 	RESTIC_PASSWORD       = "changeit"
-	AWS_ACCESS_KEY_ID     = "FXM5IHHQN4YKR0DGHWMK"
-	AWS_SECRET_ACCESS_KEY = "aMo34LD11kUaIzkYPsdlkkArxDDCWZUweI4Q887g"
+	AWS_ACCESS_KEY_ID     = "minio12345"
+	AWS_SECRET_ACCESS_KEY = "minio12345"
 )
 
 var (
@@ -48,8 +49,8 @@ var (
 func (i *Invocation) GetRepositorySecretSpec() *core.Secret {
 	return &core.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      RepositorySecretName,
-			Namespace: i.Namespace(),
+			Name:      MinioRepositorySecretName,
+			Namespace: i.databaseNamespace,
 		},
 		Type: core.SecretTypeOpaque,
 		Data: map[string][]byte{
@@ -63,13 +64,34 @@ func (i *Invocation) GetRepositorySecretSpec() *core.Secret {
 func (i *TestOptions) CreateRepository() error {
 	// Create the secret first, then Repository itself
 	secret = i.GetRepositorySecretSpec()
-	err := i.myClient.Create(context.TODO(), secret)
-	if err != nil {
+	var s core.Secret
+	err := i.myClient.Get(context.TODO(), types.NamespacedName{
+		Namespace: secret.GetNamespace(),
+		Name:      secret.GetName(),
+	}, &s)
+	if errors.IsNotFound(err) {
+		err = i.myClient.Create(context.TODO(), secret)
+		if err != nil {
+			return err
+		}
+	} else if err != nil {
 		return err
 	}
 
 	repo = i.GetRepositorySpec(i.DBType)
-	err = i.myClient.Create(context.TODO(), repo)
+	var r repository.Repository
+	err = i.myClient.Get(context.TODO(), types.NamespacedName{
+		Namespace: repo.GetNamespace(),
+		Name:      repo.GetName(),
+	}, &r)
+	if errors.IsNotFound(err) {
+		err = i.myClient.Create(context.TODO(), repo)
+		if err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
 	return err
 }
 func (i *TestOptions) DeleteRepository() error {

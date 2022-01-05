@@ -5,6 +5,7 @@ import (
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clientutil "kmodules.xyz/client-go/api/v1"
 	ofst "kmodules.xyz/offshoot-api/api/v1"
 	kdm "kubedb.dev/apimachinery/apis/kubedb/v1alpha2"
 )
@@ -35,13 +36,14 @@ func (i *Invocation) GetMongoDBSpec(opts ...*DBOptions) *kdm.MongoDB {
 	retDB := &kdm.MongoDB{
 		ObjectMeta: meta.ObjectMeta{
 			Name:      MongoDBName,
-			Namespace: i.Namespace(),
+			Namespace: i.databaseNamespace,
 		},
 		Spec: kdm.MongoDBSpec{
-			Version: "4.4.6",
+			Version: MongoDBVersion,
 		},
 	}
 	for _, opt := range opts {
+		// DBType
 		if opt.DBType == Sharded {
 			retDB.Spec.ShardTopology = &kdm.MongoDBShardingTopology{
 				Shard: kdm.MongoDBShardNode{
@@ -74,9 +76,21 @@ func (i *Invocation) GetMongoDBSpec(opts ...*DBOptions) *kdm.MongoDB {
 			retDB.Spec.Replicas = func(i int32) *int32 { return &i }(3)
 			retDB.Spec.StorageType = kdm.StorageTypeDurable
 			retDB.Spec.Storage = storage
-		} else { // standAlone
+		} else if opt.DBType == StandAlone {
 			retDB.Spec.StorageType = kdm.StorageTypeDurable
 			retDB.Spec.Storage = storage
+		}
+		// TLS
+		if opt.SslModeEnabled {
+			retDB.Spec.SSLMode = kdm.SSLModeRequireSSL
+			retDB.Spec.TLS = &clientutil.TLSConfig{
+				IssuerRef: &core.TypedLocalObjectReference{
+					APIGroup: func(s string) *string { return &s }("cert-manager.io"),
+					Kind:     "Issuer",
+					Name:     "ca-issuer",
+				},
+			}
+			retDB.Spec.ClusterAuthMode = kdm.ClusterAuthModeX509
 		}
 	}
 	return retDB
@@ -86,6 +100,7 @@ func (i *TestOptions) CreateMongoDB() error {
 	err := i.myClient.Create(context.TODO(), i.Mongodb)
 	return err
 }
+
 func (i *TestOptions) DeleteMongoDB() error {
 	err := i.myClient.Delete(context.TODO(), i.Mongodb)
 	return err

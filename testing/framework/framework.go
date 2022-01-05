@@ -2,22 +2,21 @@ package framework
 
 import (
 	batchv1 "k8s.io/api/batch/v1"
-	core "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	kdm "kubedb.dev/apimachinery/apis/kubedb/v1alpha2"
 	schemav1alpha1 "kubedb.dev/schema-manager/apis/schema/v1alpha1"
 	kvm_server "kubevault.dev/apimachinery/apis/kubevault/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	stash "stash.appscode.dev/apimachinery/apis/stash/v1beta1"
 )
 
 type Framework struct {
-	restConfig *rest.Config
-	kubeClient kubernetes.Interface
-	myClient   client.Client
-	namespace  string
-	name       string
+	restConfig        *rest.Config
+	kubeClient        kubernetes.Interface
+	myClient          client.Client
+	schemaNamespace   string
+	vaultNamespace    string
+	databaseNamespace string
 }
 
 func New(
@@ -26,12 +25,25 @@ func New(
 	myClient client.Client,
 ) *Framework {
 	return &Framework{
-		restConfig: restConfig,
-		kubeClient: kubeClient,
-		myClient:   myClient,
-		name:       "kfc",
-		namespace:  "wow",
+		restConfig:        restConfig,
+		kubeClient:        kubeClient,
+		myClient:          myClient,
+		schemaNamespace:   SchemaNamespace,
+		vaultNamespace:    VaultNamespace,
+		databaseNamespace: DatabaseNamespace,
 	}
+}
+
+func (f *Framework) SetNamespace(db, vault, schema string) {
+	f.schemaNamespace = schema
+	f.vaultNamespace = vault
+	f.databaseNamespace = db
+}
+
+func (f *Framework) SetSameNamespace() {
+	f.schemaNamespace = CommonNamespace
+	f.vaultNamespace = CommonNamespace
+	f.databaseNamespace = CommonNamespace
 }
 
 var (
@@ -64,9 +76,15 @@ type DBOptions struct {
 	DBType         string
 	SslModeEnabled bool
 }
+
 type SchemaOptions struct {
-	AutoApproval bool
-	ToRestore    bool
+	AutoApproval       bool
+	ToRestore          bool
+	SchemaDatabaseName string
+	VolumeSourceSecret bool
+}
+
+type VaultOptions struct {
 }
 
 type TestOptions struct {
@@ -74,9 +92,8 @@ type TestOptions struct {
 	Mongodb        *kdm.MongoDB
 	Vault          *kvm_server.VaultServer
 	SchemaDatabase *schemav1alpha1.MongoDBDatabase
-	InitJob        *batchv1.Job
-	RestoreSession *stash.RestoreSession
+	RunnerJob      *batchv1.Job
 	*DBOptions
 	*SchemaOptions
-	Secret *core.Secret
+	*VaultOptions
 }

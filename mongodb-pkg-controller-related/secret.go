@@ -36,10 +36,10 @@ import (
 )
 
 /*
-if db.Spec.AuthSecret exists
+if db.Spec.AuthSecret doesn't exist
 	createAuthSecret
 	PatchMongoDB
- */
+*/
 func (c *Reconciler) ensureAuthSecret(db *api.MongoDB) error {
 	if db.Spec.AuthSecret == nil {
 		authSecret, err := c.createAuthSecret(db)
@@ -63,7 +63,7 @@ func (c *Reconciler) ensureAuthSecret(db *api.MongoDB) error {
 /*
 It calls checkSecret(), if authSecret doesn't already exist, then
 It creates an Auth secret, assign the labels, ensures the ownerReference
- */
+*/
 func (c *Reconciler) createAuthSecret(db *api.MongoDB) (*core.LocalObjectReference, error) {
 	authSecretName := db.Name + api.MongoDBAuthSecretSuffix
 
@@ -97,7 +97,7 @@ func (c *Reconciler) createAuthSecret(db *api.MongoDB) (*core.LocalObjectReferen
 
 /*
 check if secret with the given name, & owned by MongoDb ; exists or not.
- */
+*/
 func (c *Reconciler) checkSecret(secretName string, db *api.MongoDB) (*core.Secret, error) {
 	secret, err := c.Client.CoreV1().Secrets(db.Namespace).Get(context.TODO(), secretName, metav1.GetOptions{})
 	if err != nil {
@@ -125,8 +125,8 @@ func (c *Controller) MongoDBForSecret(s *core.Secret) cache.ExplicitKey {
 
 /*
 EnsureKeyFileSecret calls ensureKeyFileSecret if
-sslMode + shardTopology + ReplicaSet exists in db.Spec
- */
+sslMode or shardTopology or ReplicaSet exists in db.Spec
+*/
 func (c *Reconciler) EnsureKeyFileSecret(db *api.MongoDB) error {
 	sslMode := db.Spec.SSLMode
 	if (sslMode != api.SSLModeDisabled && sslMode != "") ||
@@ -190,10 +190,8 @@ func (c *Reconciler) ensureKeyFileSecret(db *api.MongoDB) error {
 	return nil
 }
 
-
-
 /*
 EnsureKeyFileSecret -> ensureKeyFileSecret -> checkSecret
 ensureAuthSecret -> createAuthSecret -> checkSecret
 MongoDBForSecret  no call here, this will be called from initSecretWatcher() of workQueue.go
- */
+*/
